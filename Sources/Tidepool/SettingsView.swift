@@ -124,11 +124,11 @@ struct SettingsView: View {
             return "Off"
         }
         switch tool.state {
-        case .active: tool.unofficial ? "Active · Unofficial" : "Active"
-        case .comingSoon: "Detected · coming soon"
-        case .notDetected: "Not detected"
-        case .undetectable: tool.note ?? "No install marker"
-        case .limitedData: "Limited data"
+        case .active: return tool.unofficial ? "Active · Unofficial" : "Active"
+        case .comingSoon: return "Detected · coming soon"
+        case .notDetected: return "Not detected"
+        case .undetectable: return tool.note ?? "No install marker"
+        case .limitedData: return "Limited data"
         }
     }
 }
