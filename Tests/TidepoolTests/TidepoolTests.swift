@@ -279,7 +279,8 @@ struct StaticCredentials: CredentialReading {
         fileManager: .default
     )
     let status = ToolDetector.status(for: input)
-    #expect(status.first { $0.id == ToolCatalog.cursor }?.state == .comingSoon)
+    #expect(status.first { $0.id == ToolCatalog.cursor }?.state == .active)
+    #expect(status.first { $0.id == ToolCatalog.cursor }?.unofficial == true)
     #expect(status.first { $0.id == ToolCatalog.wisprFlow }?.state == .comingSoon)
     #expect(status.first { $0.id == ToolCatalog.claudeCode }?.state == .active)
     #expect(status.first { $0.id == ToolCatalog.codex }?.state == .active)

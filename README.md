@@ -1,6 +1,6 @@
 # Tidepool
 
-A macOS 26 menu bar app for AI usage limits. Claude Code is the session view: the 5-hour and weekly limits, when they reset, and which session is waiting on you. Codex, OpenRouter, Gemini CLI, OpenCode, z.ai, and DeepSeek add the meters their own docs or clients actually expose.
+A macOS 26 menu bar app for AI usage limits. Claude Code is the session view: the 5-hour and weekly limits, when they reset, and which session is waiting on you. Codex, OpenRouter, Gemini CLI, OpenCode, z.ai, and DeepSeek add the meters their own docs or clients actually expose. Cursor and GitHub Copilot are unofficial: community endpoints, labeled Unofficial, and off when Settings → Unofficial providers is off.
 
 The panel follows the Floating Needs-you mockup: light on the left, dark on the right, example data.
 
@@ -23,7 +23,7 @@ Tidepool is not affiliated with Anthropic. The 5-hour block estimate follows the
 
 Extra usage is shown only when the payload includes `extra_usage.utilization`. Community notes disagree on whether `used_credits` is dollars or cents, so Tidepool does not display that field.
 
-The menu bar item is the template symbol `gauge.with.dots.needle.50percent` plus the 5-hour percent. It is drawn in system orange only while a session needs you. Settings can hide the percent or add the reset countdown.
+The menu bar item is the template symbol `gauge.with.dots.needle.50percent` plus a percent: the 5-hour window when the selected provider has one, otherwise the first usage row. Cursor's menu percent is Included. GitHub Copilot's is Premium. It is drawn in system orange only while a session needs you. Settings can hide the percent or add the reset countdown. The countdown stays on the 5-hour window.
 
 ## Install
 
@@ -79,12 +79,14 @@ Tidepool does not run analytics. A credential is read into memory and sent only 
 | `ZAI_API_KEY` | `https://api.z.ai/api/monitor/usage/quota/limit` |
 | `ZHIPUAI_API_KEY`, only when `ZAI_API_KEY` is unset | `https://open.bigmodel.cn/api/monitor/usage/quota/limit` |
 | `DEEPSEEK_API_KEY` | `https://api.deepseek.com/user/balance` |
+| Cursor `cursorAuth/accessToken` from `state.vscdb`, read-only. The refresh token is not read. | `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
+| GitHub `oauth_token` from `~/.config/github-copilot/apps.json` or `hosts.json`, or the `github.com` block of `~/.config/gh/hosts.yml` (or `GH_CONFIG_DIR`). The keychain is not read. | `GET https://api.github.com/copilot_internal/user` |
 
 Tokens and keys are not written to Tidepool's support folder. Tidepool does not refresh OAuth tokens. Prompt text from `UserPromptSubmit` is discarded. Transcript parsing keeps usage, timestamps, cwd, git branch, role, and ids. A permission hook keeps the tool name and a short command or path, not the conversation.
 
 ## Other tools
 
-The header switches among providers that are actually installed. Cursor, Wispr Flow, GitHub Copilot, Devin Desktop, Kiro, Amp, Aider, Factory, and the ChatGPT app still show as **coming soon** when detected. See [ROADMAP.md](ROADMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The header switches among providers that are actually installed. A selected unofficial provider shows a monochrome **Unofficial** badge. Wispr Flow, Devin Desktop, Kiro, Amp, Aider, Factory, and the ChatGPT app still show as **coming soon** when detected. See [ROADMAP.md](ROADMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Codex
 
@@ -142,13 +144,35 @@ The key is `OPENCODE_API_KEY` ([Pi harness](https://opencode.ai/v2/docs/console/
 |---|---|---|
 | Balance text, and whether it is enough for API calls | `GET https://api.deepseek.com/user/balance` | Server strings: `is_available`, `total_balance`, `granted_balance`, `topped_up_balance`, `currency`. No percent, because the API publishes no cap. |
 
+### Cursor (Unofficial)
+
+| What you see | Source | Kind |
+|---|---|---|
+| Included percent | `includedSpend / limit` on `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`. Both fields are cents. | Server cents, divided. This is the figure Cursor's included-usage sentence is described as using. |
+| Total and Auto percents | `planUsage.totalPercentUsed` and `autoPercentUsed` on the same response | Server percents. They are not the same denominator as Included. |
+| On-demand and Team pool, only when that limit is greater than zero | `spendLimitUsage.individualUsed / individualLimit` and `pooledUsed / pooledLimit` | Server cents, divided. |
+| Reset | `billingCycleEnd`, unix milliseconds | Server timestamp. No countdown; it is a billing period. |
+
+`apiPercentUsed` is not shown. It can disagree with Included on the same payload. Nothing here is an estimate. The access token is a read-only sqlite query of `cursorAuth/accessToken` in `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`. Tidepool does not read `cursorAuth/refreshToken`, does not write the database, and does not call the token endpoint. A body with none of Included, Total, or Auto becomes **Limited data**. Settings → Unofficial providers turns the call off.
+
+### GitHub Copilot (Unofficial)
+
+| What you see | Source | Kind |
+|---|---|---|
+| Premium, Chat, and Completions used percents | `GET https://api.github.com/copilot_internal/user` `quota_snapshots.*.percent_remaining` | Server remaining percent. The bar is `100 - percent_remaining`. |
+| The same rows when `percent_remaining` is absent | `entitlement` and `remaining` on that snapshot, when `entitlement` is greater than zero | Server counts, divided. |
+| Chat and Completions on the free tier | `limited_user_quotas` as the remaining count and `monthly_quotas` as the cap, and only when both exist for that key | Server counts, divided. |
+| Reset | `quota_reset_date_utc`, `quota_reset_date`, a non-zero `quota_reset_at`, or `limited_user_reset_date` | Server timestamp. |
+
+`unlimited: true` and `entitlement: -1` draw no bar. A response with no `quota_snapshots`, `limited_user_quotas`, or `monthly_quotas` becomes **Limited data**. The token comes from the Copilot editor config or the `github.com` block of gh's `hosts.yml`. Tidepool does not read the keychain, does not run `gh auth token`, and does not refresh the token. Org billing is not called. Settings → Unofficial providers turns the call off.
+
 ## Develop
 
 ```bash
 swift test
 ```
 
-Tests cover the usage JSON, the status-line JSON, transcript dedupe, block boundaries, list prices, hook ingestion, the settings installer, and install detection. They do not call Anthropic.
+Tests cover the usage JSON, the status-line JSON, transcript dedupe, block boundaries, list prices, hook ingestion, the settings installer, install detection, and the unofficial Cursor and Copilot fixtures. They do not call Anthropic, Cursor, or GitHub.
 
 GitHub Actions runs `swift test` and `swift build -c release` on `macos-26`. A Linux checkout can run `swift test` (the SwiftUI app is not part of the package there). It cannot compile the menu bar app.
 

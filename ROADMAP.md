@@ -21,20 +21,30 @@ The token is read from `~/.claude/.credentials.json` (`claudeAiOauth.accessToken
 
 List prices for the footer are the public [pricing table](https://platform.claude.com/docs/en/about-claude/pricing) (rate card effective 2026-10-07). They are not the user's plan price.
 
-## Cursor (detected, not implemented)
+## Cursor (implemented, unofficial)
 
-**How to tell it is installed.** The Mac app bundle is `Cursor.app`, and the documented shell command is `cursor`. OpenUsage records the macOS user-data directory as `~/Library/Application Support/Cursor` ([OpenUsage: Cursor](https://openusage.sh/docs/providers/cursor/)). Tidepool treats any one of those as detection. It does not read the directory. The bundle name is the app's own; there is no separate install-path page in the Cursor docs linked below.
+**How to tell it is installed.** The Mac app bundle is `Cursor.app`, and the documented shell command is `cursor`. OpenUsage records the macOS user-data directory as `~/Library/Application Support/Cursor` ([OpenUsage: Cursor](https://openusage.sh/docs/providers/cursor/)). Tidepool treats any one of those as detection.
 
-**What the user can see.** [Usage and limits](https://cursor.com/help/models-and-usage/usage-limits) says The X Subscription has one weekly pool shared by Cursor, Grok Bot, and the Grok apps, shown at grok.com/dashboard and in editor settings. Legacy Cursor plans have two monthly pools on the dashboard Spending tab. Reset is weekly for The X Subscription. The legacy reset cadence is described there as monthly pools. No personal HTTP API is specified on that page.
+**What the user can see.** [Usage and limits](https://cursor.com/help/models-and-usage/usage-limits) says The X Subscription has one weekly pool shared by Cursor, Grok Bot, and the Grok apps, shown at grok.com/dashboard and in editor settings. Legacy Cursor plans have two monthly pools on the dashboard Spending tab. No personal HTTP API is specified on that page.
 
-**Do not confuse these with plan usage.**
+**Unofficial source.** Community clients call `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` with body `{}`, `Authorization: Bearer`, and `Connect-Protocol-Version: 1` ([OpenTokenUsage](https://github.com/PowerUserZ/OpenTokenUsage/blob/main/docs/providers/cursor.md), [ASU provider contracts](https://github.com/allixsenos/asu/blob/main/docs/provider-contracts.md)). The access token is `cursorAuth/accessToken` in `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` ([onWatch](https://github.com/onllm-dev/onWatch/blob/main/docs/CURSOR_SETUP.md)). Tidepool runs `sqlite3 -readonly` on a `file:` URI with `mode=ro`. The SQL is a constant that names only `cursorAuth/accessToken`.
 
-- [Get Rate Limit](https://cursor.com/docs/api/origin/reference/get-rate-limit) is the Origin API's per-minute point budget (`resources.core.limit`, `remaining`, `used`, `reset`). It is not the editor's weekly or monthly allowance.
-- The [Admin and Analytics APIs](https://cursor.com/docs/api) expose team usage. They are not a single-user menu-bar source, and Tidepool has no team token.
+**Shown, all server figures, none estimated.**
 
-**Undocumented, not used.** OpenUsage and [Harnery](https://harnery.com/cli/devtools/) describe a dashboard call authenticated with the IDE session in `state.vscdb` (`GetCurrentPeriodUsage` / `cursor.com/api/dashboard/get-current-period-usage`) returning a percent used and cycle bounds. That is not in Cursor's public API reference. A Cursor provider should not call it until the request and response are confirmed against a current client, and it should say the figure is unofficial.
+- Included: `planUsage.includedSpend / planUsage.limit`. Both are cents. [Traycer](https://github.com/traycerai/traycer/pull/1265) shows Cursor's included-usage sentence matching that division rather than `totalPercentUsed`.
+- Total: `planUsage.totalPercentUsed`, when finite.
+- Auto: `planUsage.autoPercentUsed`, when finite.
+- On-demand: `spendLimitUsage.individualUsed / individualLimit`, only when the limit is greater than zero.
+- Team pool: `spendLimitUsage.pooledUsed / pooledLimit`, only when the limit is greater than zero.
+- Reset: `billingCycleEnd` (unix milliseconds, often a string). No countdown.
 
-**Unknown.** The on-disk schema of `state.vscdb`, whether a local file contains the weekly percent without a network call, and the exact JSON for legacy versus X Subscription pools.
+`totalPercentUsed` and `includedSpend / limit` use different denominators ([cursor-sdk2api #19](https://github.com/Sunnyender-org/cursor-sdk2api/issues/19)). Tidepool shows them as separate rows. `apiPercentUsed` is omitted: the same notes show it disagreeing with Included, including on plan-only accounts. `displayMessage` is not parsed into a percent.
+
+**Not called.** `POST https://api2.cursor.sh/oauth/token`, `GetPlanInfo`, `GetUsageLimitPolicyStatus`, `cursor.com/api/auth/stripe`, and `cursor.com/api/usage`. The refresh token and the keychain item `cursor-access-token` are not read. The database is not written. The [Origin rate limit](https://cursor.com/docs/api/origin/reference/get-rate-limit) and the [Admin API](https://cursor.com/docs/api) are not the personal meter.
+
+**When it fails.** A 200 body with none of Included, Total, or Auto, or HTTP 404 or 410, becomes availability `.limited` and a notice that starts with "Limited data". HTTP 401 or 403 says the saved session was rejected and Tidepool does not refresh it. Settings → Unofficial providers skips the read and the call. The panel badge says Unofficial.
+
+**Unknown.** A published schema for this Connect method. Whether every plan still returns `billingCycleEnd` as milliseconds.
 
 ## Codex (implemented)
 
@@ -114,11 +124,30 @@ The [xAI API rate limits](https://docs.x.ai/developers/rate-limits) (requests pe
 
 **Shown.** The balance sentence. No bar, because no spending cap is in the payload. No session feed.
 
+## GitHub Copilot (implemented, unofficial)
+
+**Detection.** The CLI binary is `copilot`, the config directory is `~/.copilot`, and `COPILOT_HOME` overrides it ([config directory](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference)). Editor plugins write `~/.config/github-copilot`, and `gh` writes `~/.config/gh` ([OpenUsage](https://github.com/robinebers/openusage/blob/main/docs/providers/copilot.md)). Tidepool treats any of those as detection.
+
+**Not the meter.** `/usage` inside the CLI is an interactive command ([best practices](https://docs.github.com/en/copilot/how-tos/copilot-cli/cli-best-practices)). The [Copilot SDK](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing) documents `account.getQuota` as an SDK RPC, not as an HTTP call. Org billing (`/orgs/{org}/settings/billing/usage/summary`) is not the personal quota.
+
+**Unofficial source.** `GET https://api.github.com/copilot_internal/user` ([OpenTokenUsage](https://github.com/PowerUserZ/OpenTokenUsage/blob/main/docs/providers/copilot.md), [burnrate](https://upld-internal.github.io/burnrate-copilot/research/copilot-api.html), [aistat](https://github.com/drogers0/aistat/pull/19)). It is not in the public REST docs. The token is read from, in order, `~/.config/github-copilot/apps.json`, the older `hosts.json`, then `oauth_token` in the `github.com` block of `~/.config/gh/hosts.yml`, then the same file under `GH_CONFIG_DIR` when that directory exists. Only `oauth_token` is accepted. `refresh_token` is ignored. Another host's token is ignored. The macOS keychain service `gh:github.com` is not read, and `gh auth token` is not run.
+
+The request uses the headers those community clients send: `Authorization: Bearer`, `Accept: application/json`, `X-Github-Api-Version: 2025-04-01`, `Editor-Version: vscode/1.96.2`, `Editor-Plugin-Version: copilot-chat/0.26.7`, and `User-Agent: GitHubCopilotChat/0.26.7`. Those headers are the unofficial route's client shape. Tidepool is not VS Code.
+
+**Shown, all server figures, none estimated.**
+
+- Premium, Chat, and Completions from `quota_snapshots`, in that order. Used percent is `100 - percent_remaining`. If `percent_remaining` is missing and `entitlement` is greater than zero, used percent is `(entitlement - remaining) / entitlement`.
+- `unlimited: true` or `entitlement` below zero skips that row. Since June 2026, paid chat and completions are often unlimited ([burnrate live capture](https://upld-internal.github.io/burnrate-copilot/research/copilot-api.html)).
+- Free tier: `limited_user_quotas` is the remaining count and `monthly_quotas` is the cap ([OpenTokenUsage](https://github.com/PowerUserZ/OpenTokenUsage/blob/main/docs/providers/copilot.md), [OmniRoute #2881](https://github.com/diegosouzapw/OmniRoute/pull/2881)). A percent is drawn only when both numbers exist for the same key and remaining is not above the cap.
+- Reset prefers a non-zero `quota_reset_at` (epoch milliseconds; zero is ignored), then `quota_reset_date_utc`, then `quota_reset_date`, then `limited_user_reset_date`.
+
+**When it fails.** A JSON object with none of `quota_snapshots`, `limited_user_quotas`, or `monthly_quotas`, or HTTP 404 or 410, becomes **Limited data**. A recognized body whose buckets are all unlimited stays ready, with no bars, and says Copilot reports no finite quota. HTTP 401 or 403 says the saved token was rejected and Tidepool does not refresh it. Login, `analytics_tracking_id`, and the token are not shown. Settings → Unofficial providers skips the read and the call. The panel badge says Unofficial.
+
+**Unknown.** A GitHub-authored schema for `copilot_internal/user`. The editor `apps.json` map is read one level deep for `oauth_token` only; other keys in that file are not documented here.
+
 ## Left without a meter
 
 These are detected and labeled coming soon. None of them has a request Tidepool can cite without guessing or scraping a session.
-
-**GitHub Copilot.** The CLI binary is `copilot`, the config directory is `~/.copilot`, and `COPILOT_HOME` overrides it ([config directory](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference)). `/usage` inside the CLI is an interactive command ([best practices](https://docs.github.com/en/copilot/how-tos/copilot-cli/cli-best-practices)). The [Copilot SDK](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing) documents `account.getQuota` → `quotaSnapshots.premium_interactions` (`entitlementRequests`, `usedRequests`, `remainingPercentage`, `resetDate`) as an SDK RPC, not as an HTTP call. `GET https://api.github.com/copilot_internal/user` is not in the public REST docs, so Tidepool does not call it.
 
 **Windsurf, now Devin Desktop.** On June 2, 2026 the Mac app changed from Windsurf to `Devin.app` ([FAQ](https://docs.devin.ai/desktop/devin-desktop-faq)). The config directory in the uninstall steps is `~/.codeium/windsurf` ([getting started](https://docs.windsurf.com/windsurf/getting-started)). The usage meter in the app and the plan page show the daily and weekly quota ([plans and usage](https://docs.devin.ai/desktop/accounts/usage)). The [Analytics API](https://docs.devin.ai/desktop/accounts/api-reference/analytics-v2-introduction) is an organization consumption report for a service key, not that personal remaining quota. No local file for the meter was found.
 
@@ -131,8 +160,6 @@ These are detected and labeled coming soon. None of them has a request Tidepool 
 **Factory.** The Droid CLI installs the `droid` binary ([quickstart](https://docs.factory.com/droid-cli/quickstart) and `https://app.factory.ai/cli`). Readers that show Factory usage use browser cookies and WorkOS. No documented local or key-based usage response was confirmed.
 
 **ChatGPT desktop.** The current Mac app and the previous one show up as ChatGPT and ChatGPT Classic ([moving to the new app](https://help.openai.com/en/articles/20001276-moving-to-the-new-chatgpt-desktop-app)). Tidepool looks for `ChatGPT.app` and `ChatGPT Classic.app`. Codex usage for the coding agent is already the Codex provider (`codex app-server` and `~/.codex`). No separate documented usage file for the desktop chat plan was found, so the app is detection only and is not given a second invented meter.
-
-**Cursor.** Still the detected-not-implemented entry above. The dashboard call and `state.vscdb` stay unused.
 
 ## Later, still inside the protocol
 

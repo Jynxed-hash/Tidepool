@@ -53,6 +53,8 @@ public struct CatalogEntry: Sendable, Equatable, Identifiable {
     public var undetectableReason: String?
     /// Installed tools whose provider can only explain where the user should look.
     public var limitedData: Bool
+    /// The usage call is a community endpoint, not a published API.
+    public var unofficial: Bool
 
     public init(
         id: String,
@@ -60,7 +62,8 @@ public struct CatalogEntry: Sendable, Equatable, Identifiable {
         implemented: Bool,
         signature: InstallSignature?,
         undetectableReason: String? = nil,
-        limitedData: Bool = false
+        limitedData: Bool = false,
+        unofficial: Bool = false
     ) {
         self.id = id
         self.displayName = displayName
@@ -68,6 +71,7 @@ public struct CatalogEntry: Sendable, Equatable, Identifiable {
         self.signature = signature
         self.undetectableReason = undetectableReason
         self.limitedData = limitedData
+        self.unofficial = unofficial
     }
 }
 
@@ -77,13 +81,22 @@ public struct CatalogStatus: Sendable, Equatable, Identifiable {
     public var state: CatalogState
     public var evidence: [String]
     public var note: String?
+    public var unofficial: Bool
 
-    public init(id: String, displayName: String, state: CatalogState, evidence: [String], note: String? = nil) {
+    public init(
+        id: String,
+        displayName: String,
+        state: CatalogState,
+        evidence: [String],
+        note: String? = nil,
+        unofficial: Bool = false
+    ) {
         self.id = id
         self.displayName = displayName
         self.state = state
         self.evidence = evidence
         self.note = note
+        self.unofficial = unofficial
     }
 }
 
@@ -120,13 +133,14 @@ public enum ToolCatalog {
         CatalogEntry(
             id: cursor,
             displayName: "Cursor",
-            implemented: false,
+            implemented: true,
             signature: InstallSignature(
                 id: cursor,
                 applicationNames: ["Cursor.app"],
                 executableNames: ["cursor"],
                 homeRelativePaths: ["Library/Application Support/Cursor"]
-            )
+            ),
+            unofficial: true
         ),
         CatalogEntry(
             id: codex,
@@ -209,13 +223,14 @@ public enum ToolCatalog {
         CatalogEntry(
             id: copilot,
             displayName: "GitHub Copilot",
-            implemented: false,
+            implemented: true,
             signature: InstallSignature(
                 id: copilot,
                 executableNames: ["copilot"],
-                homeRelativePaths: [".copilot"],
+                homeRelativePaths: [".copilot", ".config/github-copilot", ".config/gh"],
                 environmentDirectoryVariables: ["COPILOT_HOME"]
-            )
+            ),
+            unofficial: true
         ),
         CatalogEntry(
             id: windsurf,
@@ -321,7 +336,8 @@ public enum ToolDetector {
                 displayName: entry.displayName,
                 state: state,
                 evidence: evidence,
-                note: entry.undetectableReason
+                note: entry.undetectableReason,
+                unofficial: entry.unofficial
             )
         }
     }
