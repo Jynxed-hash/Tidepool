@@ -95,7 +95,9 @@ final class DirectoryWatch: @unchecked Sendable {
             release: nil,
             copyDescription: nil
         )
-        let flags = kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagUseCFTypes
+        let flags = FSEventStreamCreateFlags(
+            UInt32(kFSEventStreamCreateFlagFileEvents) | UInt32(kFSEventStreamCreateFlagUseCFTypes)
+        )
         guard let created = FSEventStreamCreate(
             nil,
             { _, info, _, _, _, _ in

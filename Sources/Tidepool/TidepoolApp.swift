@@ -3,7 +3,7 @@ import SwiftUI
 import UserNotifications
 
 enum NotificationHub {
-    static let presenter = NotificationPresenter()
+    @MainActor static let presenter = NotificationPresenter()
 }
 
 @main

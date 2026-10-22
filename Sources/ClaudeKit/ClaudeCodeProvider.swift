@@ -225,4 +225,10 @@ public struct ClaudeCodeProvider<HTTP: HTTPSending, Credentials: CredentialReadi
     }
 }
 
+extension ClaudeCodeProvider where HTTP == URLSessionHTTP, Credentials == ClaudeCredentialReader {
+    public init(git: GitInspector = .live()) {
+        self.init(http: URLSessionHTTP(), credentials: ClaudeCredentialReader(), git: git)
+    }
+}
+
 public typealias LiveClaudeProvider = ClaudeCodeProvider<URLSessionHTTP, ClaudeCredentialReader>
