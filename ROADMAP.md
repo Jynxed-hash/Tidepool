@@ -36,23 +36,25 @@ List prices for the footer are the public [pricing table](https://platform.claud
 
 **Unknown.** The on-disk schema of `state.vscdb`, whether a local file contains the weekly percent without a network call, and the exact JSON for legacy versus X Subscription pools.
 
-## Codex (detected, not implemented)
+## Codex (implemented)
 
 **How to tell it is installed.** Official defaults are the `codex` binary and `~/.codex`, overridable with `CODEX_HOME` ([Codex app-server](https://learn.chatgpt.com/docs/app-server), and the credential notes in [Pacebar](https://pacebar.io/docs/providers/codex)). Tidepool detects those. It does not read `auth.json`.
 
 **Documented quota.** [Codex app-server](https://learn.chatgpt.com/docs/app-server) documents JSON-RPC `account/rateLimits/read`. The sample result has `rateLimits.primary.usedPercent`, `windowDurationMins`, and `resetsAt` (Unix seconds), an optional `secondary` window, `rateLimitsByLimitId`, and `rateLimitResetCredits`. `account/usage/read` returns token-activity summaries. `account/rateLimits/updated` is a notification. ChatGPT auth is required; an API key does not serve these limits ([app-server tests](https://github.com/openai/codex/blob/53b50197/codex-rs/app-server/tests/suite/v2/rate_limits.rs)). The interactive `/status` command shows the same windows ([OpenAI Help](https://help.openai.com/en/articles/11369540-using-codex-with-your-chatgpt-plan-usage-limits-and-troubleshooting)).
 
-**Session files, unofficial shape.** People read `~/.codex/sessions/**/rollout-*.jsonl` for a `token_count` event whose `payload.rate_limits` has `primary` / `secondary` `used_percent`, `window_minutes`, and `resets_at`. [Paneherd](https://paneherd.com/guides/codex-usage-limits) says this format is not documented and older builds used `resets_in_seconds`. Treat it as a fallback and label it.
+**Session files.** The Codex rollout recorder writes `sessions/YYYY/MM/DD/rollout-*.jsonl`. A persisted `token_count` event carries `rate_limits` using `RateLimitWindow`: `used_percent`, `window_minutes`, and `resets_at` ([protocol.rs](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/protocol.rs)). [Paneherd](https://paneherd.com/guides/codex-usage-limits) notes older builds used `resets_in_seconds`. Tidepool does not read that older field. The file is a fallback, and the panel says so.
 
 **Undocumented HTTP.** Pacebar and OpenUsage describe `GET https://chatgpt.com/backend-api/wham/usage` with the ChatGPT access token. OpenAI's public app-server page does not list that URL. Do not call it from Tidepool until it is confirmed. Do not refresh Codex tokens.
 
-**Unknown.** Which `limitId` values a given plan returns, and the session JSON for "needs you" versus merely idle. There is no Codex hook story in the sources above.
+**What Tidepool reads.** `account/rateLimits/read` for windows, `account/usage/read` for today's token bucket, and `thread/list` for status. `waitingOnApproval` is the only active flag the app-server page shows, so that is the only Needs you signal. Session files are the offline copy of `RateLimitWindow` (`used_percent`, `window_minutes`, `resets_at`) under `sessions/YYYY/MM/DD/rollout-*.jsonl`, which is the path the Codex rollout recorder writes. Turn start and completion events in that file are an activity estimate. `ExecApprovalRequest` is not persisted, so the file cannot say Needs you. `/status` stays an interactive command ([developer commands](https://learn.chatgpt.com/docs/developer-commands)).
 
-## Grok Bot (not detected)
+**Unknown.** Which `limitId` values a given plan returns. A 15-minute sample window in the app-server docs is not relabeled as 5-hour. Compressed `.jsonl.zst` rollouts are not read.
 
-Grok Bot is a Cursor surface, not a separate Mac app we can point at. [Grok Bot on The X Subscription](https://docs.x.ai/x-subscription/grok-bot) says usage is the weekly shared pool and is visible at grok.com/dashboard (Usage) or the Cursor dashboard before a switch. [Grok Bot FAQs](https://cursor.com/help/grok-bot/faqs) say the meter is also under Grok Bot → Settings → Usage & Billing, and that it is not the SuperGrok meter.
+## Grok Bot (detected, limited data)
 
-No CLI binary, bundle name, or config directory for Grok Bot itself showed up in those docs. Tidepool therefore has no signature and will not mark Grok Bot installed when Cursor is.
+The desktop app is installed by dragging **Grok Bot** to Applications ([get started](https://docs.x.ai/grok-bot/get-started)). Tidepool treats `Grok Bot.app` as the install marker. It does not treat Cursor as Grok Bot.
+
+[Grok Bot FAQs](https://cursor.com/help/grok-bot/faqs) and [Usage and limits](https://cursor.com/help/models-and-usage/usage-limits) put the weekly pool in Grok Bot under Settings → Usage & Billing and at grok.com/dashboard. [Approvals](https://docs.x.ai/grok-bot/approvals-security-and-privacy) says an action that needs you shows up in the conversation. None of those pages name a local file or a supported API for the percentage or the pending approval. Tidepool shows that limitation and does not invent a request. It does not read `~/.grokbot`, which is not in those docs.
 
 The [xAI API rate limits](https://docs.x.ai/developers/rate-limits) (requests per second and tokens per minute, by model and spend tier) are a different product. They are not Grok Bot's weekly pool.
 

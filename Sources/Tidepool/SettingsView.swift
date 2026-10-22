@@ -113,6 +113,7 @@ struct SettingsView: View {
         case .comingSoon: "Detected · coming soon"
         case .notDetected: "Not detected"
         case .undetectable: tool.note ?? "No install marker"
+        case .limitedData: "Limited data"
         }
     }
 }

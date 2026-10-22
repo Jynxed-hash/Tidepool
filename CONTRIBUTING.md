@@ -17,7 +17,7 @@ A signature may include only markers you can cite:
 - `homeRelativePaths`: directories under the home folder
 - `environmentDirectoryVariables`: variables like `CODEX_HOME` whose value is a directory
 
-If you cannot name a marker, leave `signature` nil and set `undetectableReason`. An empty signature must not become "coming soon" just because a related app is installed. Cover that with a test in `Tests/TidepoolTests/TidepoolTests.swift`.
+If you cannot name a marker, leave `signature` nil and set `undetectableReason`. An empty signature must not become "coming soon" just because a related app is installed. Set `limitedData` when the tool is detectable but no supported source exposes usage or session state, and return `ProviderSnapshot.availability = .limited` with a notice that says where the person can look. Cover that with a test in `Tests/TidepoolTests`.
 
 ## 3. Implement `UsageProvider`
 
