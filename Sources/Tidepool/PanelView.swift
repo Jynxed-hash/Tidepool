@@ -36,7 +36,9 @@ struct PanelView: View {
                     }
                     if store.snapshot.availability != .limited {
                         usage(now: timeline.date)
-                        sessions(now: timeline.date)
+                        if showsSessions {
+                            sessions(now: timeline.date)
+                        }
                     }
                     if !store.comingSoon.isEmpty {
                         Divider().padding(.vertical, 8)
@@ -140,6 +142,17 @@ struct PanelView: View {
             }
         }
         .padding(.bottom, 12)
+    }
+
+    /// API meters have no session feed. An empty list would look like a failed lookup.
+    private var showsSessions: Bool {
+        if !store.snapshot.sessions.isEmpty { return true }
+        switch store.snapshot.providerID {
+        case ToolCatalog.openRouter, ToolCatalog.geminiCLI, ToolCatalog.openCode, ToolCatalog.zai, ToolCatalog.deepSeek:
+            return false
+        default:
+            return true
+        }
     }
 
     private func sessions(now: Date) -> some View {

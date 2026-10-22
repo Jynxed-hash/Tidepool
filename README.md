@@ -1,6 +1,6 @@
 # Tidepool
 
-A macOS 26 menu bar app for Claude Code. It shows the 5-hour and weekly limits, when they reset, and which session is waiting on you.
+A macOS 26 menu bar app for AI usage limits. Claude Code is the session view: the 5-hour and weekly limits, when they reset, and which session is waiting on you. Codex, OpenRouter, Gemini CLI, OpenCode, z.ai, and DeepSeek add the meters their own docs or clients actually expose.
 
 The panel follows the Floating Needs-you mockup: light on the left, dark on the right, example data.
 
@@ -67,13 +67,24 @@ brew install --cask jynxed-hash/tap/tidepool
 
 ## Privacy
 
-Everything stays on this Mac except one request. When a Claude Code token is available, Tidepool sends it as `Authorization: Bearer` to `https://api.anthropic.com/api/oauth/usage` and nowhere else. There is no analytics.
+Tidepool does not run analytics. A credential is read into memory and sent only to that product's own usage host:
 
-The token is not written to Tidepool's support folder, the event log, or the log. Prompt text from `UserPromptSubmit` is discarded. Transcript parsing keeps usage, timestamps, cwd, git branch, role, and ids. A permission hook keeps the tool name and a short command or path, not the conversation.
+| Credential | Sent to |
+|---|---|
+| Claude Code OAuth token | `https://api.anthropic.com/api/oauth/usage` |
+| Codex, through the local `codex app-server` process | no extra host; Codex speaks for itself |
+| `OPENROUTER_API_KEY` | `https://openrouter.ai/api/v1/key` |
+| Gemini CLI `access_token` from `~/.gemini/oauth_creds.json`, and only while `expiry_date` is still in the future | `https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` and `:retrieveUserQuota` |
+| `OPENCODE_API_KEY` | `https://opencode.ai/zen/go/v1/usage` |
+| `ZAI_API_KEY` | `https://api.z.ai/api/monitor/usage/quota/limit` |
+| `ZHIPUAI_API_KEY`, only when `ZAI_API_KEY` is unset | `https://open.bigmodel.cn/api/monitor/usage/quota/limit` |
+| `DEEPSEEK_API_KEY` | `https://api.deepseek.com/user/balance` |
+
+Tokens and keys are not written to Tidepool's support folder. Tidepool does not refresh OAuth tokens. Prompt text from `UserPromptSubmit` is discarded. Transcript parsing keeps usage, timestamps, cwd, git branch, role, and ids. A permission hook keeps the tool name and a short command or path, not the conversation.
 
 ## Other tools
 
-The header switches among providers that are actually installed. Cursor and Wispr Flow still show as **coming soon**. See [ROADMAP.md](ROADMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The header switches among providers that are actually installed. Cursor, Wispr Flow, GitHub Copilot, Devin Desktop, Kiro, Amp, Aider, Factory, and the ChatGPT app still show as **coming soon** when detected. See [ROADMAP.md](ROADMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Codex
 
@@ -90,6 +101,46 @@ The header switches among providers that are actually installed. Cursor and Wisp
 ### Grok Bot
 
 Detection is the app the install guide tells you to drag to Applications: `Grok Bot.app`. Cursor being installed does not count. The weekly pool is shown in Grok Bot under Settings → Usage & Billing and at grok.com/dashboard. No supported local file or API exposes that percentage, or which conversation is waiting on approval. The panel says so and does not draw a bar. Settings labels the tool **Limited data**.
+
+### OpenRouter
+
+| What you see | Source | Kind |
+|---|---|---|
+| Key limit percent, from `limit` and `limit_remaining` (or `usage` when remaining is absent) | `GET https://openrouter.ai/api/v1/key` | Server dollars. The percent is that division. A null `limit` draws no bar. |
+| Budget percent, from `effective_budget.spend_usd` / `limit_usd`, with `resets_at` | Same response | Server dollars. |
+| Free models today, from `free_model_daily_requests.used` / `limit` | Same response | Server counts. |
+| Today, dollars only | `usage_daily` | Server dollars for the current UTC day. Not a token count. |
+
+The key is `OPENROUTER_API_KEY` ([install](https://openrouter.ai/docs/install)). Tidepool does not copy it.
+
+### Gemini CLI
+
+| What you see | Source | Kind |
+|---|---|---|
+| One row per model, used percent `100 * (1 - remainingFraction)` | `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` after `loadCodeAssist` returns `cloudaicompanionProject` | Server fraction, from the [Gemini CLI client](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/types.ts). Several buckets for one model keep the lowest remaining fraction. |
+| Nothing, with a notice | `~/.gemini/oauth_creds.json` `expiry_date` already passed, or no `access_token` | Tidepool does not refresh the token and does not read `refresh_token`. |
+
+### OpenCode
+
+| What you see | Source | Kind |
+|---|---|---|
+| Rolling, weekly, and monthly percents, plus `resetsAt` | `GET https://opencode.ai/zen/go/v1/usage` | Server percent. The rolling row stays "Rolling" because the payload has no duration. |
+
+The key is `OPENCODE_API_KEY` ([Pi harness](https://opencode.ai/v2/docs/console/harnesses/pi/)). `auth.json` is not parsed.
+
+### z.ai
+
+| What you see | Source | Kind |
+|---|---|---|
+| 5-hour, weekly, and monthly tool-call percents, plus `nextResetTime` | `GET /api/monitor/usage/quota/limit` on `api.z.ai` or `open.bigmodel.cn` | `percentage` is the server figure used by OpenUsage and CodexBar. Rows with another `unit` are skipped. This path is not in Z.AI's public API reference. |
+
+`ZAI_API_KEY` is the name in the [Z.AI OpenAI guide](https://docs.z.ai/guides/develop/openai/python) and is sent only to `api.z.ai`. `ZHIPUAI_API_KEY` is sent only to `open.bigmodel.cn`, and only when the global key is unset.
+
+### DeepSeek
+
+| What you see | Source | Kind |
+|---|---|---|
+| Balance text, and whether it is enough for API calls | `GET https://api.deepseek.com/user/balance` | Server strings: `is_available`, `total_balance`, `granted_balance`, `topped_up_balance`, `currency`. No percent, because the API publishes no cap. |
 
 ## Develop
 

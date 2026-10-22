@@ -3,6 +3,7 @@ import CodexKit
 import Foundation
 import GrokKit
 import HookBridge
+import MeterKit
 import ProviderKit
 import SwiftUI
 import UserNotifications
@@ -140,7 +141,21 @@ final class TidepoolStore {
             async let claudeSnapshot = LiveClaudeProvider().refresh(request)
             async let codexSnapshot = LiveCodexProvider().refresh(request)
             async let grokSnapshot = GrokBotProvider().refresh(request)
-            return [await claudeSnapshot, await codexSnapshot, await grokSnapshot]
+            async let openRouterSnapshot = LiveOpenRouterProvider().refresh(request)
+            async let geminiSnapshot = LiveGeminiProvider().refresh(request)
+            async let openCodeSnapshot = LiveOpenCodeProvider().refresh(request)
+            async let zaiSnapshot = LiveZAIProvider().refresh(request)
+            async let deepSeekSnapshot = LiveDeepSeekProvider().refresh(request)
+            return [
+                await claudeSnapshot,
+                await codexSnapshot,
+                await grokSnapshot,
+                await openRouterSnapshot,
+                await geminiSnapshot,
+                await openCodeSnapshot,
+                await zaiSnapshot,
+                await deepSeekSnapshot,
+            ]
         }.value
         var next: [String: ProviderSnapshot] = [:]
         for fresh in fetched {
@@ -175,6 +190,9 @@ final class TidepoolStore {
         if !previous.windows.isEmpty {
             merged.windows = previous.windows
             merged.notice = previous.notice
+            merged.retryAfter = previous.retryAfter
+        } else if fresh.notice == nil, let notice = previous.notice {
+            merged.notice = notice
             merged.retryAfter = previous.retryAfter
         }
         if previous.today.origin == .server {

@@ -252,6 +252,9 @@ public enum TokenFormat {
     }
 
     public static func todayLine(_ estimate: UsageEstimate) -> String {
+        if estimate.tokens == 0, let cost = estimate.costUSD, estimate.origin != .estimate {
+            return "Today \(dollars(cost))"
+        }
         let approximate = estimate.origin == .estimate
         let tokens = approximate
             ? "Today ≈ \(compact(estimate.tokens)) tokens"

@@ -1,6 +1,6 @@
 # Contributing a provider
 
-Claude Code is the only provider that fetches data. Another tool gets a real provider only after the numbers it shows are in [ROADMAP.md](ROADMAP.md) with a source. If the source does not name a field, do not invent one.
+A tool gets a real provider only after the numbers it shows are in [ROADMAP.md](ROADMAP.md) with a source. If the source does not name a field, do not invent one. Claude Code, Codex, OpenRouter, Gemini CLI, OpenCode Go, z.ai, and DeepSeek each have a source written down there. Grok Bot is detected and reports limited data.
 
 ## 1. Write down the source
 
@@ -16,6 +16,7 @@ A signature may include only markers you can cite:
 - `executableNames`: binaries on `PATH`
 - `homeRelativePaths`: directories under the home folder
 - `environmentDirectoryVariables`: variables like `CODEX_HOME` whose value is a directory
+- `environmentValueVariables`: variables like `OPENROUTER_API_KEY` that count when non-empty. Record the name only. Never put the value in evidence, logs, or the panel.
 
 If you cannot name a marker, leave `signature` nil and set `undetectableReason`. An empty signature must not become "coming soon" just because a related app is installed. Set `limitedData` when the tool is detectable but no supported source exposes usage or session state, and return `ProviderSnapshot.availability = .limited` with a notice that says where the person can look. Cover that with a test in `Tests/TidepoolTests`.
 
@@ -45,7 +46,7 @@ Read credentials in memory. Do not copy them into Application Support, and do no
 
 ## 4. Register it
 
-`TidepoolStore.refresh` constructs `LiveClaudeProvider` today. Add the new provider beside that call and merge its windows only when that provider is the one the panel is showing, or when the panel grows a real switch. Coming-soon rows are produced by `ToolDetector` and should disappear once `implemented` is true and the tool is detected (`CatalogState.active`).
+`TidepoolStore.refresh` constructs the live providers in one detached task. Add the new provider beside those calls. Coming-soon rows are produced by `ToolDetector` and should disappear once `implemented` is true and the tool is detected (`CatalogState.active`).
 
 Keep the panel on the design in `README.md`: monochrome, flat bars, orange only for Needs you, red only at or above 90 percent, glass only on the bell, the needs-you pill, session rows, and their buttons.
 

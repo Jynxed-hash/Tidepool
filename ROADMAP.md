@@ -70,6 +70,70 @@ The [xAI API rate limits](https://docs.x.ai/developers/rate-limits) (requests pe
 
 **Unknown.** A supported way to read "N words left" without scraping the UI. No config-directory path is cited here, so Tidepool does not look for one.
 
+## OpenRouter (implemented)
+
+**Detection.** `OPENROUTER_API_KEY`, the variable in the [install guide](https://openrouter.ai/docs/install). The value is not stored.
+
+**Source.** [Get current API key](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-api-key): `GET https://openrouter.ai/api/v1/key`. The example names `limit`, `limit_remaining`, `limit_reset`, `usage`, `usage_daily`, `effective_budget` (`limit_usd`, `spend_usd`, `reset_interval`, `resets_at`), and `free_model_daily_requests` (`used`, `limit`, `remaining`).
+
+**Shown.** Percents are `used / limit` from those fields. `limit: null` is unlimited and draws no bar. `usage_daily` is today's dollars, not a token count. `rate_limit` is marked deprecated on that page and is ignored. There is no session feed.
+
+## Gemini CLI (implemented)
+
+**Detection.** The `gemini` binary, or `~/.gemini`. The OAuth file constant is `oauth_creds.json` under the global Gemini directory ([storage.ts](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/config/storage.ts)).
+
+**Source.** The CLI posts `retrieveUserQuota` to `https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` with `{ "project": "<id>" }` ([server.ts](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/server.ts)). The project id is `cloudaicompanionProject` from `loadCodeAssist` ([types.ts](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/types.ts)). Buckets carry `modelId`, `remainingFraction`, `remainingAmount`, `resetTime`, and `tokenType`. A captured bucket is in [gemini-cli#14883](https://github.com/google-gemini/gemini-cli/issues/14883). The CLI keeps the lowest `remainingFraction` per model.
+
+**Shown.** Used percent is `100 * (1 - remainingFraction)`. The access token is read from `access_token`. `expiry_date` at or above 1e11 is milliseconds, matching the timestamp the CLI persists. An expired token is not refreshed and `refresh_token` is never sent. API-key and Vertex logins are not this file, so they get the missing-file notice. No session feed.
+
+**Unknown.** A supported local quota cache that would survive an expired access token without a refresh.
+
+## OpenCode (implemented)
+
+**Detection.** The `opencode` binary, `~/.local/share/opencode` ([troubleshooting](https://opencode.ai/docs/troubleshooting/)), or `OPENCODE_API_KEY`.
+
+**Source.** `GET https://opencode.ai/zen/go/v1/usage` is the route in [usage.ts](https://github.com/anomalyco/opencode/blob/dev/packages/console/app/src/routes/zen/go/v1/usage.ts), added in [opencode#16513](https://github.com/anomalyco/opencode/pull/16513). Live responses in [opencode#53701](https://github.com/anomalyco/opencode/issues/53701) are `{ "usage": { "rolling": { "status", "percent", "resetsAt" }, "weekly", "monthly" } }`. `percent` is used percent, floored. The key variable is `OPENCODE_API_KEY` ([Pi harness](https://opencode.ai/v2/docs/console/harnesses/pi/)).
+
+**Shown.** Rolling, weekly, and monthly rows. The rolling title stays "Rolling" because the JSON does not include a duration. Dollars are not in this payload. `auth.json` is documented as the credential file, but not its JSON shape, so Tidepool does not read it. No session feed.
+
+## z.ai (implemented)
+
+**Detection.** `ZAI_API_KEY` ([Z.AI OpenAI guide](https://docs.z.ai/guides/develop/openai/python)) or `ZHIPUAI_API_KEY`.
+
+**Source.** Official plan pages describe a 5-hour limit and a weekly quota in the subscription UI ([FAQ](https://docs.z.ai/devpack/faq)). They do not publish this HTTP shape. The path `GET /api/monitor/usage/quota/limit` is the one OpenUsage, CodexBar, and pi-glm-usage call. Captured bodies agree on `data.limits[]` with `type`, `unit`, `number`, `percentage`, and `nextResetTime` (epoch milliseconds). `unit` 3 with `number` 5 is the 5-hour token window. `unit` 6 is the weekly token window (`number` 1, and in one write-up 7). `type` `TIME_LIMIT` with `unit` 5 is the monthly tool ceiling. `percentage` is used percent. `success: false` is an error even on HTTP 200.
+
+**Shown.** Those three windows, and only when `percentage` is present. Other `unit` values are skipped. Counts such as `usage` and `currentValue` are not turned into a second percent, because write-ups disagree on which field is the cap. The global key is sent only to `https://api.z.ai`. The China key is sent only to `https://open.bigmodel.cn`, and only when the global key is unset. No session feed.
+
+**Unknown.** A Z.AI-authored schema for this monitor path. Standard API balance for a key that is not on a Coding Plan.
+
+## DeepSeek (implemented)
+
+**Detection.** `DEEPSEEK_API_KEY`, the variable in the [first API call](https://api-docs.deepseek.com/) guide.
+
+**Source.** [Get User Balance](https://api-docs.deepseek.com/api/get-user-balance): `GET https://api.deepseek.com/user/balance`. Fields: `is_available`, `balance_infos[].currency`, `total_balance`, `granted_balance`, `topped_up_balance`. Balances are strings. Currency is `CNY` or `USD`.
+
+**Shown.** The balance sentence. No bar, because no spending cap is in the payload. No session feed.
+
+## Left without a meter
+
+These are detected and labeled coming soon. None of them has a request Tidepool can cite without guessing or scraping a session.
+
+**GitHub Copilot.** The CLI binary is `copilot`, the config directory is `~/.copilot`, and `COPILOT_HOME` overrides it ([config directory](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference)). `/usage` inside the CLI is an interactive command ([best practices](https://docs.github.com/en/copilot/how-tos/copilot-cli/cli-best-practices)). The [Copilot SDK](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/usage-and-billing) documents `account.getQuota` → `quotaSnapshots.premium_interactions` (`entitlementRequests`, `usedRequests`, `remainingPercentage`, `resetDate`) as an SDK RPC, not as an HTTP call. `GET https://api.github.com/copilot_internal/user` is not in the public REST docs, so Tidepool does not call it.
+
+**Windsurf, now Devin Desktop.** On June 2, 2026 the Mac app changed from Windsurf to `Devin.app` ([FAQ](https://docs.devin.ai/desktop/devin-desktop-faq)). The config directory in the uninstall steps is `~/.codeium/windsurf` ([getting started](https://docs.windsurf.com/windsurf/getting-started)). The usage meter in the app and the plan page show the daily and weekly quota ([plans and usage](https://docs.devin.ai/desktop/accounts/usage)). The [Analytics API](https://docs.devin.ai/desktop/accounts/api-reference/analytics-v2-introduction) is an organization consumption report for a service key, not that personal remaining quota. No local file for the meter was found.
+
+**Kiro.** Installs as `kiro-cli` and, via Homebrew, `Kiro CLI.app` ([downloads](https://kiro.dev/downloads/), [Homebrew cask](https://formulae.brew.sh/cask/kiro-cli)). `/usage` prints a credit breakdown inside the chat session ([slash commands](https://kiro.dev/docs/reference/slash-commands/)). That output is not a documented machine-readable contract, so Tidepool does not scrape it. The IDE download is not given a bundle name here.
+
+**Amp.** The install script provides the `amp` binary (`https://ampcode.com/install.sh`). Published readers use browser cookies. No local quota file or documented usage API was confirmed.
+
+**Aider.** The command is `aider` ([install](https://aider.chat/docs/install.html)). Aider spends another provider's API key. It does not publish a quota of its own.
+
+**Factory.** The Droid CLI installs the `droid` binary ([quickstart](https://docs.factory.com/droid-cli/quickstart) and `https://app.factory.ai/cli`). Readers that show Factory usage use browser cookies and WorkOS. No documented local or key-based usage response was confirmed.
+
+**ChatGPT desktop.** The current Mac app and the previous one show up as ChatGPT and ChatGPT Classic ([moving to the new app](https://help.openai.com/en/articles/20001276-moving-to-the-new-chatgpt-desktop-app)). Tidepool looks for `ChatGPT.app` and `ChatGPT Classic.app`. Codex usage for the coding agent is already the Codex provider (`codex app-server` and `~/.codex`). No separate documented usage file for the desktop chat plan was found, so the app is detection only and is not given a second invented meter.
+
+**Cursor.** Still the detected-not-implemented entry above. The dashboard call and `state.vscdb` stay unused.
+
 ## Later, still inside the protocol
 
 A new provider implements `UsageProvider` and returns `UsageWindow` values with an honest `DataOrigin`. Sessions use `needsYou`, `working`, and `idle`. Anything that is not a documented server figure is `estimate` and the UI already prints `est.`. Detection changes belong in `ToolCatalog` and need a source in this file. Do not add a network call whose request shape is only a guess.
