@@ -46,4 +46,10 @@ public struct CodexProvider<Live: CodexLiveReading>: UsageProvider {
     }
 }
 
+extension CodexProvider where Live == CodexProcessReader {
+    public init() {
+        self.init(live: CodexProcessReader())
+    }
+}
+
 public typealias LiveCodexProvider = CodexProvider<CodexProcessReader>
