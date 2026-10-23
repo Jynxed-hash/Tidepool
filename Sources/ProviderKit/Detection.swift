@@ -35,6 +35,8 @@ public enum CatalogState: String, Sendable, Equatable {
     case notDetected
     /// We do not know a trustworthy on-disk marker, so we do not guess.
     case undetectable
+    /// Installed, and the provider has no supported usage or session feed.
+    case limitedData
 }
 
 public struct CatalogEntry: Sendable, Equatable, Identifiable {
@@ -44,19 +46,23 @@ public struct CatalogEntry: Sendable, Equatable, Identifiable {
     public var signature: InstallSignature?
     /// Shown when `signature` is nil.
     public var undetectableReason: String?
+    /// Installed tools whose provider can only explain where the user should look.
+    public var limitedData: Bool
 
     public init(
         id: String,
         displayName: String,
         implemented: Bool,
         signature: InstallSignature?,
-        undetectableReason: String? = nil
+        undetectableReason: String? = nil,
+        limitedData: Bool = false
     ) {
         self.id = id
         self.displayName = displayName
         self.implemented = implemented
         self.signature = signature
         self.undetectableReason = undetectableReason
+        self.limitedData = limitedData
     }
 }
 
@@ -108,7 +114,7 @@ public enum ToolCatalog {
         CatalogEntry(
             id: codex,
             displayName: "Codex",
-            implemented: false,
+            implemented: true,
             signature: InstallSignature(
                 id: codex,
                 executableNames: ["codex"],
@@ -119,9 +125,12 @@ public enum ToolCatalog {
         CatalogEntry(
             id: grokBot,
             displayName: "Grok Bot",
-            implemented: false,
-            signature: nil,
-            undetectableReason: "No documented on-disk marker yet"
+            implemented: true,
+            signature: InstallSignature(
+                id: grokBot,
+                applicationNames: ["Grok Bot.app"]
+            ),
+            limitedData: true
         ),
         CatalogEntry(
             id: wisprFlow,
@@ -164,6 +173,8 @@ public enum ToolDetector {
                 state = .undetectable
             } else if evidence.isEmpty {
                 state = .notDetected
+            } else if entry.implemented && entry.limitedData {
+                state = .limitedData
             } else if entry.implemented {
                 state = .active
             } else {

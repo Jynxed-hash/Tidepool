@@ -73,14 +73,23 @@ The token is not written to Tidepool's support folder, the event log, or the log
 
 ## Other tools
 
-Claude Code is the only provider that reads usage. On launch, Tidepool looks for install markers it can actually name:
+The header switches among providers that are actually installed. Cursor and Wispr Flow still show as **coming soon**. See [ROADMAP.md](ROADMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- Claude Code: a `claude` binary, or `~/.claude`
-- Cursor: `Cursor.app`, a `cursor` binary, or `~/Library/Application Support/Cursor`
-- Codex: a `codex` binary, `~/.codex`, or `CODEX_HOME`
-- Wispr Flow: `Wispr Flow.app`
+### Codex
 
-Detected tools without a provider show as **coming soon**. Grok Bot has no documented on-disk marker, so it is not reported as installed just because Cursor is. See [ROADMAP.md](ROADMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+| What you see | Source | Kind |
+|---|---|---|
+| 5-hour, weekly, or other windows, named from `windowDurationMins` (300 minutes is the 5-hour row, 10080 is weekly) | `codex app-server` JSON-RPC `account/rateLimits/read` after `initialize` / `initialized` | Server figure. ChatGPT auth inside Codex. Tidepool does not call `account/read`, log in, or redeem a reset. |
+| The same windows when app-server does not answer | Newest `token_count` event in `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (`used_percent`, `window_minutes`, `resets_at`) | Server figure Codex already wrote down. The panel says it came from the session file. |
+| Today's tokens | `account/usage/read` `dailyUsageBuckets` for the local calendar day | Server figure. No dollar amount. |
+| Needs you | `thread/list` status `active` with `activeFlags` containing `waitingOnApproval` | From Codex, while app-server is reachable. The waiting line does not include the command. Thread previews are not shown. |
+| Working / Idle with `(est.)` | Last persisted `task_started` / `turn_started` or `task_complete` / `turn_complete` / `turn_aborted` in a rollout from the last 12 hours | **Estimate.** Approval requests are not stored in the rollout, so a session file alone never becomes Needs you. |
+
+`/status` is an interactive TUI command. It has no machine-readable contract, so Tidepool does not scrape it.
+
+### Grok Bot
+
+Detection is the app the install guide tells you to drag to Applications: `Grok Bot.app`. Cursor being installed does not count. The weekly pool is shown in Grok Bot under Settings → Usage & Billing and at grok.com/dashboard. No supported local file or API exposes that percentage, or which conversation is waiting on approval. The panel says so and does not draw a bar. Settings labels the tool **Limited data**.
 
 ## Develop
 
