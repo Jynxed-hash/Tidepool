@@ -24,6 +24,11 @@ struct SettingsView: View {
             Toggle("Notifications when a session needs you", isOn: notifications)
             Toggle("Launch at login", isOn: launch)
             Toggle("Claude Code hooks", isOn: hooks)
+            Toggle("Unofficial providers", isOn: unofficial)
+            Text("Cursor and GitHub Copilot use undocumented endpoints. Turning this off skips those calls.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Menu bar")
                     .font(.caption.weight(.semibold))
@@ -86,6 +91,13 @@ struct SettingsView: View {
         )
     }
 
+    private var unofficial: Binding<Bool> {
+        Binding(
+            get: { store.unofficialProvidersEnabled },
+            set: { store.setUnofficialProviders($0) }
+        )
+    }
+
     private var hooks: Binding<Bool> {
         Binding(
             get: { store.hooksEnabled },
@@ -108,12 +120,15 @@ struct SettingsView: View {
     }
 
     private func label(_ tool: CatalogStatus) -> String {
+        if tool.unofficial && tool.state == .active && !store.unofficialProvidersEnabled {
+            return "Off"
+        }
         switch tool.state {
-        case .active: "Active"
-        case .comingSoon: "Detected · coming soon"
-        case .notDetected: "Not detected"
-        case .undetectable: tool.note ?? "No install marker"
-        case .limitedData: "Limited data"
+        case .active: return tool.unofficial ? "Active · Unofficial" : "Active"
+        case .comingSoon: return "Detected · coming soon"
+        case .notDetected: return "Not detected"
+        case .undetectable: return tool.note ?? "No install marker"
+        case .limitedData: return "Limited data"
         }
     }
 }

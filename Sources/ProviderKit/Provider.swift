@@ -171,19 +171,52 @@ public struct ProviderRefreshRequest: Sendable {
     public var allowNetwork: Bool
     /// Process environment. `CODEX_HOME` overrides `~/.codex` when it names a directory the caller already resolved.
     public var environment: [String: String]
+    /// When false, unofficial providers skip credential reads and network calls.
+    public var allowUnofficial: Bool
 
     public init(
         now: Date,
         home: URL,
         supportDirectory: URL,
         allowNetwork: Bool = true,
-        environment: [String: String] = [:]
+        environment: [String: String] = [:],
+        allowUnofficial: Bool = true
     ) {
         self.now = now
         self.home = home
         self.supportDirectory = supportDirectory
         self.allowNetwork = allowNetwork
         self.environment = environment
+        self.allowUnofficial = allowUnofficial
+    }
+}
+
+/// Quiet ticks keep the last networked usage payload, including a limited-data notice.
+public enum QuietTick {
+    public static func retaining(_ fresh: ProviderSnapshot, previous: ProviderSnapshot?) -> ProviderSnapshot {
+        guard let previous else { return fresh }
+        var merged = fresh
+        if !previous.windows.isEmpty {
+            merged.windows = previous.windows
+            merged.notice = previous.notice
+            merged.retryAfter = previous.retryAfter
+            merged.availability = previous.availability
+        } else if fresh.notice == nil, let notice = previous.notice {
+            merged.notice = notice
+            merged.retryAfter = previous.retryAfter
+            merged.availability = previous.availability
+        }
+        if previous.today.origin == .server {
+            merged.today = previous.today
+        }
+        return merged
+    }
+}
+
+/// Menu bar percent prefers the 5-hour window. Other providers use their first row.
+public enum MenuMeter {
+    public static func window(in snapshot: ProviderSnapshot) -> UsageWindow? {
+        snapshot.fiveHour ?? snapshot.windows.first
     }
 }
 
@@ -252,6 +285,9 @@ public enum TokenFormat {
     }
 
     public static func todayLine(_ estimate: UsageEstimate) -> String {
+        if estimate.tokens == 0, let cost = estimate.costUSD, estimate.origin != .estimate {
+            return "Today \(dollars(cost))"
+        }
         let approximate = estimate.origin == .estimate
         let tokens = approximate
             ? "Today ≈ \(compact(estimate.tokens)) tokens"

@@ -36,7 +36,9 @@ struct PanelView: View {
                     }
                     if store.snapshot.availability != .limited {
                         usage(now: timeline.date)
-                        sessions(now: timeline.date)
+                        if showsSessions {
+                            sessions(now: timeline.date)
+                        }
                     }
                     if !store.comingSoon.isEmpty {
                         Divider().padding(.vertical, 8)
@@ -63,9 +65,12 @@ struct PanelView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 6) {
             providerTitle
-            Spacer()
+            if store.selectedIsUnofficial {
+                unofficialBadge
+            }
+            Spacer(minLength: 8)
             Button {
                 Task { await store.setNotifications(enabled: !store.notificationsEnabled) }
             } label: {
@@ -76,6 +81,18 @@ struct PanelView: View {
             .accessibilityLabel(store.notificationsEnabled ? "Notifications on" : "Notifications off")
         }
         .padding(.bottom, 10)
+    }
+
+    private var unofficialBadge: some View {
+        Text("Unofficial")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .overlay {
+                Capsule().strokeBorder(Color.secondary.opacity(0.45), lineWidth: 0.5)
+            }
+            .accessibilityLabel("Unofficial")
     }
 
     @ViewBuilder
@@ -140,6 +157,18 @@ struct PanelView: View {
             }
         }
         .padding(.bottom, 12)
+    }
+
+    /// API meters have no session feed. An empty list would look like a failed lookup.
+    private var showsSessions: Bool {
+        if !store.snapshot.sessions.isEmpty { return true }
+        switch store.snapshot.providerID {
+        case ToolCatalog.openRouter, ToolCatalog.geminiCLI, ToolCatalog.openCode, ToolCatalog.zai, ToolCatalog.deepSeek,
+            ToolCatalog.cursor, ToolCatalog.copilot:
+            return false
+        default:
+            return true
+        }
     }
 
     private func sessions(now: Date) -> some View {

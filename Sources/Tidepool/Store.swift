@@ -3,6 +3,7 @@ import CodexKit
 import Foundation
 import GrokKit
 import HookBridge
+import MeterKit
 import ProviderKit
 import SwiftUI
 import UserNotifications
@@ -29,6 +30,7 @@ enum PreferenceKey {
     static let hooks = "tidepool.hooks"
     static let refresh = "tidepool.refreshSeconds"
     static let provider = "tidepool.provider"
+    static let unofficial = "tidepool.unofficialProviders"
 }
 
 @MainActor
@@ -41,6 +43,7 @@ final class TidepoolStore {
     var notificationsEnabled: Bool
     var hooksEnabled: Bool
     var refreshSeconds: Double
+    var unofficialProvidersEnabled: Bool
     var showingSettings = false
     var expandedSessionID: String?
     var actionNotice: String?
@@ -58,6 +61,7 @@ final class TidepoolStore {
         self.hooksEnabled = defaults.bool(forKey: PreferenceKey.hooks)
         let stored = defaults.double(forKey: PreferenceKey.refresh)
         self.refreshSeconds = stored >= 60 ? stored : 90
+        self.unofficialProvidersEnabled = defaults.object(forKey: PreferenceKey.unofficial) as? Bool ?? true
         self.launchAtLogin = LoginItem.enabled
         let storedProvider = defaults.string(forKey: PreferenceKey.provider) ?? ToolCatalog.claudeCode
         self.selectedProviderID = storedProvider
@@ -83,8 +87,14 @@ final class TidepoolStore {
     var providerChoices: [CatalogStatus] {
         catalog.filter { status in
             if status.id == ToolCatalog.claudeCode { return true }
+            if status.unofficial && !unofficialProvidersEnabled { return false }
             return status.state == .active || status.state == .limitedData
         }
+    }
+
+    var selectedIsUnofficial: Bool {
+        guard unofficialProvidersEnabled else { return false }
+        return catalog.first { $0.id == selectedProviderID }?.unofficial == true
     }
 
     var selectedTitle: String {
@@ -97,7 +107,7 @@ final class TidepoolStore {
 
     var menuPercent: String? {
         guard menuFormat != .symbol else { return nil }
-        guard let window = snapshot.fiveHour else { return nil }
+        guard let window = MenuMeter.window(in: snapshot) else { return nil }
         return "\(Int(window.usedPercent.rounded()))%"
     }
 
@@ -133,21 +143,41 @@ final class TidepoolStore {
             home: home,
             supportDirectory: support,
             allowNetwork: allowNetwork,
-            environment: environment
+            environment: environment,
+            allowUnofficial: unofficialProvidersEnabled
         )
         let previous = snapshots
         let fetched = await Task.detached(priority: .utility) {
             async let claudeSnapshot = LiveClaudeProvider().refresh(request)
             async let codexSnapshot = LiveCodexProvider().refresh(request)
             async let grokSnapshot = GrokBotProvider().refresh(request)
-            return [await claudeSnapshot, await codexSnapshot, await grokSnapshot]
+            async let openRouterSnapshot = LiveOpenRouterProvider().refresh(request)
+            async let geminiSnapshot = LiveGeminiProvider().refresh(request)
+            async let openCodeSnapshot = LiveOpenCodeProvider().refresh(request)
+            async let zaiSnapshot = LiveZAIProvider().refresh(request)
+            async let deepSeekSnapshot = LiveDeepSeekProvider().refresh(request)
+            async let cursorSnapshot = LiveCursorProvider().refresh(request)
+            async let copilotSnapshot = LiveCopilotProvider().refresh(request)
+            return [
+                await claudeSnapshot,
+                await codexSnapshot,
+                await grokSnapshot,
+                await openRouterSnapshot,
+                await geminiSnapshot,
+                await openCodeSnapshot,
+                await zaiSnapshot,
+                await deepSeekSnapshot,
+                await cursorSnapshot,
+                await copilotSnapshot,
+            ]
         }.value
         var next: [String: ProviderSnapshot] = [:]
         for fresh in fetched {
-            if allowNetwork {
+            let unofficialDisabled = !request.allowUnofficial && Self.unofficialIDs.contains(fresh.providerID)
+            if allowNetwork || unofficialDisabled {
                 next[fresh.providerID] = fresh
             } else {
-                next[fresh.providerID] = Self.retainQuietTick(fresh, previous: previous[fresh.providerID])
+                next[fresh.providerID] = QuietTick.retaining(fresh, previous: previous[fresh.providerID])
             }
         }
         let input = ToolDetector.probe(
@@ -167,20 +197,15 @@ final class TidepoolStore {
         apply(next)
     }
 
-    /// Quiet ticks keep the last networked usage windows. A local pass still
-    /// refreshes sessions, and it cannot drop a row the fallback source lacks.
-    private static func retainQuietTick(_ fresh: ProviderSnapshot, previous: ProviderSnapshot?) -> ProviderSnapshot {
-        guard let previous else { return fresh }
-        var merged = fresh
-        if !previous.windows.isEmpty {
-            merged.windows = previous.windows
-            merged.notice = previous.notice
-            merged.retryAfter = previous.retryAfter
+    private static let unofficialIDs: Set<String> = [ToolCatalog.cursor, ToolCatalog.copilot]
+
+    func setUnofficialProviders(_ enabled: Bool) {
+        unofficialProvidersEnabled = enabled
+        defaults.set(enabled, forKey: PreferenceKey.unofficial)
+        if !enabled, catalog.first(where: { $0.id == selectedProviderID })?.unofficial == true {
+            selectProvider(ToolCatalog.claudeCode)
         }
-        if previous.today.origin == .server {
-            merged.today = previous.today
-        }
-        return merged
+        Task { await refresh(allowNetwork: enabled) }
     }
 
     func toggleExpanded(_ id: String) {
