@@ -10,6 +10,11 @@ Live screenshots replace that mockup after the first signed build. The HTML for 
 
 Tidepool is not affiliated with Anthropic. The 5-hour block estimate follows the behavior described by [ccusage](https://github.com/ryoppippi/ccusage) (MIT). This project does not copy that code.
 
+## Requirements
+
+- macOS 26
+- Xcode with the macOS 26 SDK. CI prints `xcodebuild -version`, then builds with Swift Package Manager. There is no Xcode project and no Makefile.
+
 ## What is real, and what is an estimate
 
 | What you see | Source | Kind |
@@ -27,23 +32,19 @@ The menu bar item is the template symbol `gauge.with.dots.needle.50percent` plus
 
 ## Install
 
-Requires macOS 26.
-
 Build from source:
 
 ```bash
 git clone https://github.com/Jynxed-hash/Tidepool.git
 cd Tidepool
-swift build -c release --product Tidepool --product cmb-hook
-swift run Tidepool
-```
-
-`swift run` shows a Dock icon. For a menu-bar-only app, wrap the binaries:
-
-```bash
+git checkout main
 scripts/assemble-app.sh
 open dist/Tidepool.app
 ```
+
+`scripts/assemble-app.sh` runs `swift build -c release --product Tidepool --product cmb-hook` and wraps the binaries. They also remain at `.build/release/Tidepool` and `.build/release/cmb-hook`. The bundle is `dist/Tidepool.app`. `LSUIElement` is set, so it has no Dock icon. Look for the gauge in the menu bar, including the menu-bar overflow.
+
+`swift run Tidepool` also launches it, and that process shows a Dock icon because the SwiftPM run does not use the bundle's `Info.plist`.
 
 Then open Tidepool and turn on **Claude Code hooks** in Settings. That copies `cmb-hook` into `~/Library/Application Support/Tidepool/`, backs up `~/.claude/settings.json` under `~/.claude/tidepool-backups/`, and merges hook entries. Running it again does not duplicate them. Turning the switch off removes only Tidepool's entries and restores a status line Tidepool replaced.
 
@@ -86,7 +87,11 @@ Tokens and keys are not written to Tidepool's support folder. Tidepool does not 
 
 ## Other tools
 
-The header switches among providers that are actually installed. A selected unofficial provider shows a monochrome **Unofficial** badge. Wispr Flow, Devin Desktop, Kiro, Amp, Aider, Factory, and the ChatGPT app still show as **coming soon** when detected. See [ROADMAP.md](ROADMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+The header menu lists providers that are installed and have a feed. Claude Code is always listed. A selected unofficial provider shows a monochrome **Unofficial** badge.
+
+**Unofficial providers** in Settings is on by default. It covers Cursor and GitHub Copilot. Turning it off skips the token read and the network call, drops those two from the header menu, and labels them **Off** in the Tools list when they are detected. Turning it back on fetches again. The other meters are not behind that switch.
+
+Wispr Flow, Devin Desktop, Kiro, Amp, Aider, Factory, and the ChatGPT app still show as **coming soon** when detected. See [ROADMAP.md](ROADMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Codex
 
@@ -166,15 +171,56 @@ The key is `OPENCODE_API_KEY` ([Pi harness](https://opencode.ai/v2/docs/console/
 
 `unlimited: true` and `entitlement: -1` draw no bar. A response with no `quota_snapshots`, `limited_user_quotas`, or `monthly_quotas` becomes **Limited data**. The token comes from the Copilot editor config or the `github.com` block of gh's `hosts.yml`. Tidepool does not read the keychain, does not run `gh auth token`, and does not refresh the token. Org billing is not called. Settings → Unofficial providers turns the call off.
 
-## Develop
+## Testing
+
+Unit tests, from the repo root:
 
 ```bash
 swift test
 ```
 
-Tests cover the usage JSON, the status-line JSON, transcript dedupe, block boundaries, list prices, hook ingestion, the settings installer, install detection, and the unofficial Cursor and Copilot fixtures. They do not call Anthropic, Cursor, or GitHub.
+They cover usage JSON, status-line JSON, transcript dedupe, block boundaries, list prices, hook ingestion, the settings installer, install detection, Codex and Grok fixtures, the five API meters, and the unofficial Cursor and Copilot fixtures. They do not call Anthropic, Cursor, or GitHub.
 
-GitHub Actions runs `swift test` and `swift build -c release` on `macos-26`. A Linux checkout can run `swift test` (the SwiftUI app is not part of the package there). It cannot compile the menu bar app.
+### Launch and Claude Code hooks
+
+```bash
+scripts/assemble-app.sh
+open dist/Tidepool.app
+```
+
+Click the gauge, then the gear. Turn on **Claude Code hooks**. That copies `cmb-hook` to `~/Library/Application Support/Tidepool/cmb-hook`, backs up `~/.claude/settings.json` under `~/.claude/tidepool-backups/`, and merges hook entries. Confirm with:
+
+```bash
+grep -n cmb-hook ~/.claude/settings.json
+```
+
+To see **Needs you**, leave the hooks on, start Claude Code in a repo, ask it to run a shell command that is not auto-allowed, and leave the permission prompt unanswered. The gauge turns orange. The event log is:
+
+```bash
+tail -f ~/Library/Application\ Support/Tidepool/events.ndjson
+```
+
+Tidepool does not write an `os_log`. `cmb-hook` prints nothing to stdout. `statusline.json` in that folder is the last status-line snapshot. `TIDEPOOL_SUPPORT_DIR` overrides the support folder. To watch the process, quit the bundle and run `dist/Tidepool.app/Contents/MacOS/Tidepool`.
+
+### Codex
+
+Sign in to Codex with ChatGPT so `codex` is on `PATH` (or `~/.codex` exists). Open the gauge and choose **Codex** in the header. Tidepool runs `codex app-server --listen stdio://` and reads `account/rateLimits/read`, `account/usage/read`, and `thread/list`. A 5-hour or weekly bar is a server figure. If app-server does not answer, the same windows come from the newest `token_count` event under `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, and the panel says they came from the session file. **Needs you** appears only while app-server reports a thread whose status is `active` and whose `activeFlags` contain `waitingOnApproval`. A rollout file alone never becomes Needs you.
+
+### Cursor (Unofficial)
+
+Be signed in to the Cursor app so `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` contains `cursorAuth/accessToken`. Choose **Cursor** in the header. The **Unofficial** badge sits beside the title. Included, Total, and Auto are server figures from `GetCurrentPeriodUsage`. The menu bar percent is Included. Tidepool reads that one key with `sqlite3 -readonly` and does not refresh the session. A changed response shows **Limited data** and no bars.
+
+### GitHub Copilot (Unofficial)
+
+Put a GitHub `oauth_token` in `~/.config/github-copilot/apps.json` (or the older `hosts.json`), or in the `github.com` block of `~/.config/gh/hosts.yml`. Choose **GitHub Copilot**. The badge says **Unofficial**. Premium, Chat, and Completions are server figures from `GET https://api.github.com/copilot_internal/user`. The menu bar percent is Premium. Unlimited buckets draw no bar. Tidepool does not read the macOS keychain and does not run `gh auth token`.
+
+### Unofficial providers switch
+
+The switch is on unless you turn it off. Turn it off: Cursor and GitHub Copilot leave the header menu, their calls stop, and Settings lists a detected install as **Off**. Turn it on: they return on the next refresh, and the selected one shows the badge again. Claude Code, Codex, and the API-key meters stay available either way.
+
+## Develop
+
+GitHub Actions runs `swift test` and `swift build -c release --product Tidepool --product cmb-hook` on `macos-26`. A Linux checkout can run `swift test` (the SwiftUI app is not part of the package there). It cannot compile the menu bar app.
 
 ## License
 
