@@ -108,6 +108,13 @@ public struct UsageEstimate: Sendable, Equatable {
     public static let empty = UsageEstimate()
 }
 
+public enum ProviderAvailability: String, Sendable, Equatable {
+    /// Windows and sessions are filled from a source the provider can read.
+    case ready
+    /// The tool is installed, and no supported source exposes usage or session state.
+    case limited
+}
+
 public struct ProviderSnapshot: Sendable, Equatable {
     public var providerID: String
     public var windows: [UsageWindow]
@@ -118,6 +125,7 @@ public struct ProviderSnapshot: Sendable, Equatable {
     public var checkedAt: Date
     /// Set when the usage service asked us to slow down.
     public var retryAfter: TimeInterval?
+    public var availability: ProviderAvailability
 
     public init(
         providerID: String,
@@ -126,7 +134,8 @@ public struct ProviderSnapshot: Sendable, Equatable {
         today: UsageEstimate = .empty,
         notice: String? = nil,
         checkedAt: Date,
-        retryAfter: TimeInterval? = nil
+        retryAfter: TimeInterval? = nil,
+        availability: ProviderAvailability = .ready
     ) {
         self.providerID = providerID
         self.windows = windows
@@ -135,6 +144,7 @@ public struct ProviderSnapshot: Sendable, Equatable {
         self.notice = notice
         self.checkedAt = checkedAt
         self.retryAfter = retryAfter
+        self.availability = availability
     }
 
     public var needsAttention: Bool {
@@ -159,12 +169,54 @@ public struct ProviderRefreshRequest: Sendable {
     public var supportDirectory: URL
     /// When false, the provider skips the network and uses the status line or local files.
     public var allowNetwork: Bool
+    /// Process environment. `CODEX_HOME` overrides `~/.codex` when it names a directory the caller already resolved.
+    public var environment: [String: String]
+    /// When false, unofficial providers skip credential reads and network calls.
+    public var allowUnofficial: Bool
 
-    public init(now: Date, home: URL, supportDirectory: URL, allowNetwork: Bool = true) {
+    public init(
+        now: Date,
+        home: URL,
+        supportDirectory: URL,
+        allowNetwork: Bool = true,
+        environment: [String: String] = [:],
+        allowUnofficial: Bool = true
+    ) {
         self.now = now
         self.home = home
         self.supportDirectory = supportDirectory
         self.allowNetwork = allowNetwork
+        self.environment = environment
+        self.allowUnofficial = allowUnofficial
+    }
+}
+
+/// Quiet ticks keep the last networked usage payload, including a limited-data notice.
+public enum QuietTick {
+    public static func retaining(_ fresh: ProviderSnapshot, previous: ProviderSnapshot?) -> ProviderSnapshot {
+        guard let previous else { return fresh }
+        var merged = fresh
+        if !previous.windows.isEmpty {
+            merged.windows = previous.windows
+            merged.notice = previous.notice
+            merged.retryAfter = previous.retryAfter
+            merged.availability = previous.availability
+        } else if fresh.notice == nil, let notice = previous.notice {
+            merged.notice = notice
+            merged.retryAfter = previous.retryAfter
+            merged.availability = previous.availability
+        }
+        if previous.today.origin == .server {
+            merged.today = previous.today
+        }
+        return merged
+    }
+}
+
+/// Menu bar percent prefers the 5-hour window. Other providers use their first row.
+public enum MenuMeter {
+    public static func window(in snapshot: ProviderSnapshot) -> UsageWindow? {
+        snapshot.fiveHour ?? snapshot.windows.first
     }
 }
 
@@ -233,12 +285,19 @@ public enum TokenFormat {
     }
 
     public static func todayLine(_ estimate: UsageEstimate) -> String {
-        let tokens = "Today ≈ \(compact(estimate.tokens)) tokens"
+        if estimate.tokens == 0, let cost = estimate.costUSD, estimate.origin != .estimate {
+            return "Today \(dollars(cost))"
+        }
+        let approximate = estimate.origin == .estimate
+        let tokens = approximate
+            ? "Today ≈ \(compact(estimate.tokens)) tokens"
+            : "Today \(compact(estimate.tokens)) tokens"
         if estimate.costIncomplete {
             return "\(tokens) · cost incomplete"
         }
         if let cost = estimate.costUSD {
-            return "\(tokens) · ≈ \(dollars(cost))"
+            let amount = approximate ? "≈ \(dollars(cost))" : dollars(cost)
+            return "\(tokens) · \(amount)"
         }
         return tokens
     }
