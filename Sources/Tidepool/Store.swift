@@ -1,6 +1,9 @@
 import ClaudeKit
+import CodexKit
 import Foundation
+import GrokKit
 import HookBridge
+import MeterKit
 import ProviderKit
 import SwiftUI
 import UserNotifications
@@ -26,17 +29,21 @@ enum PreferenceKey {
     static let notifications = "tidepool.notifications"
     static let hooks = "tidepool.hooks"
     static let refresh = "tidepool.refreshSeconds"
+    static let provider = "tidepool.provider"
+    static let unofficial = "tidepool.unofficialProviders"
 }
 
 @MainActor
 @Observable
 final class TidepoolStore {
-    var snapshot = ProviderSnapshot(providerID: ToolCatalog.claudeCode, checkedAt: .distantPast)
+    private var snapshots: [String: ProviderSnapshot] = [:]
+    var selectedProviderID: String
     var catalog: [CatalogStatus] = []
     var menuFormat: MenuBarFormat
     var notificationsEnabled: Bool
     var hooksEnabled: Bool
     var refreshSeconds: Double
+    var unofficialProvidersEnabled: Bool
     var showingSettings = false
     var expandedSessionID: String?
     var actionNotice: String?
@@ -54,7 +61,10 @@ final class TidepoolStore {
         self.hooksEnabled = defaults.bool(forKey: PreferenceKey.hooks)
         let stored = defaults.double(forKey: PreferenceKey.refresh)
         self.refreshSeconds = stored >= 60 ? stored : 90
+        self.unofficialProvidersEnabled = defaults.object(forKey: PreferenceKey.unofficial) as? Bool ?? true
         self.launchAtLogin = LoginItem.enabled
+        let storedProvider = defaults.string(forKey: PreferenceKey.provider) ?? ToolCatalog.claudeCode
+        self.selectedProviderID = storedProvider
         UNUserNotificationCenter.current().delegate = NotificationHub.presenter
         loop = Task { [weak self] in
             await self?.runLoop()
@@ -66,13 +76,38 @@ final class TidepoolStore {
 
     var support: URL { TidepoolPaths.supportDirectory(home: home) }
 
+    var snapshot: ProviderSnapshot {
+        snapshots[selectedProviderID] ?? ProviderSnapshot(providerID: selectedProviderID, checkedAt: .distantPast)
+    }
+
     var comingSoon: [CatalogStatus] {
         catalog.filter { $0.state == .comingSoon }
     }
 
+    var providerChoices: [CatalogStatus] {
+        catalog.filter { status in
+            if status.id == ToolCatalog.claudeCode { return true }
+            if status.unofficial && !unofficialProvidersEnabled { return false }
+            return status.state == .active || status.state == .limitedData
+        }
+    }
+
+    var selectedIsUnofficial: Bool {
+        guard unofficialProvidersEnabled else { return false }
+        return catalog.first { $0.id == selectedProviderID }?.unofficial == true
+    }
+
+    var selectedTitle: String {
+        if let match = providerChoices.first(where: { $0.id == selectedProviderID }) {
+            return match.displayName
+        }
+        if selectedProviderID == ToolCatalog.claudeCode { return "Claude Code" }
+        return "Tidepool"
+    }
+
     var menuPercent: String? {
         guard menuFormat != .symbol else { return nil }
-        guard let window = snapshot.fiveHour else { return nil }
+        guard let window = MenuMeter.window(in: snapshot) else { return nil }
         return "\(Int(window.usedPercent.rounded()))%"
     }
 
@@ -95,23 +130,55 @@ final class TidepoolStore {
         }
     }
 
+    func selectProvider(_ id: String) {
+        selectedProviderID = id
+        defaults.set(id, forKey: PreferenceKey.provider)
+        expandedSessionID = nil
+    }
+
     func refresh(allowNetwork: Bool) async {
+        let environment = ProcessInfo.processInfo.environment
         let request = ProviderRefreshRequest(
             now: Date(),
             home: home,
             supportDirectory: support,
-            allowNetwork: allowNetwork
+            allowNetwork: allowNetwork,
+            environment: environment,
+            allowUnofficial: unofficialProvidersEnabled
         )
-        var fresh = await Task.detached(priority: .utility) {
-            await LiveClaudeProvider().refresh(request)
+        let previous = snapshots
+        let fetched = await Task.detached(priority: .utility) {
+            async let claudeSnapshot = LiveClaudeProvider().refresh(request)
+            async let codexSnapshot = LiveCodexProvider().refresh(request)
+            async let grokSnapshot = GrokBotProvider().refresh(request)
+            async let openRouterSnapshot = LiveOpenRouterProvider().refresh(request)
+            async let geminiSnapshot = LiveGeminiProvider().refresh(request)
+            async let openCodeSnapshot = LiveOpenCodeProvider().refresh(request)
+            async let zaiSnapshot = LiveZAIProvider().refresh(request)
+            async let deepSeekSnapshot = LiveDeepSeekProvider().refresh(request)
+            async let cursorSnapshot = LiveCursorProvider().refresh(request)
+            async let copilotSnapshot = LiveCopilotProvider().refresh(request)
+            return [
+                await claudeSnapshot,
+                await codexSnapshot,
+                await grokSnapshot,
+                await openRouterSnapshot,
+                await geminiSnapshot,
+                await openCodeSnapshot,
+                await zaiSnapshot,
+                await deepSeekSnapshot,
+                await cursorSnapshot,
+                await copilotSnapshot,
+            ]
         }.value
-        // Quiet ticks refresh sessions and today's estimate only. Usage windows
-        // stay on the last network result, so a local pass cannot drop the
-        // weekly Opus row that the status line does not report.
-        if !allowNetwork {
-            fresh.windows = snapshot.windows
-            fresh.notice = snapshot.notice
-            fresh.retryAfter = snapshot.retryAfter
+        var next: [String: ProviderSnapshot] = [:]
+        for fresh in fetched {
+            let unofficialDisabled = !request.allowUnofficial && Self.unofficialIDs.contains(fresh.providerID)
+            if allowNetwork || unofficialDisabled {
+                next[fresh.providerID] = fresh
+            } else {
+                next[fresh.providerID] = QuietTick.retaining(fresh, previous: previous[fresh.providerID])
+            }
         }
         let input = ToolDetector.probe(
             home: home,
@@ -120,11 +187,25 @@ final class TidepoolStore {
                 home.appendingPathComponent("Applications"),
                 URL(fileURLWithPath: "/System/Applications"),
             ],
-            path: ProcessInfo.processInfo.environment["PATH"] ?? "",
-            environment: ProcessInfo.processInfo.environment
+            path: environment["PATH"] ?? "",
+            environment: environment
         )
         catalog = ToolDetector.status(for: input)
-        apply(fresh)
+        if !providerChoices.contains(where: { $0.id == selectedProviderID }) {
+            selectedProviderID = ToolCatalog.claudeCode
+        }
+        apply(next)
+    }
+
+    private static let unofficialIDs: Set<String> = [ToolCatalog.cursor, ToolCatalog.copilot]
+
+    func setUnofficialProviders(_ enabled: Bool) {
+        unofficialProvidersEnabled = enabled
+        defaults.set(enabled, forKey: PreferenceKey.unofficial)
+        if !enabled, catalog.first(where: { $0.id == selectedProviderID })?.unofficial == true {
+            selectProvider(ToolCatalog.claudeCode)
+        }
+        Task { await refresh(allowNetwork: enabled) }
     }
 
     func toggleExpanded(_ id: String) {
@@ -187,9 +268,9 @@ final class TidepoolStore {
         }
     }
 
-    private func apply(_ fresh: ProviderSnapshot) {
+    private func apply(_ next: [String: ProviderSnapshot]) {
         let previous = Set(snapshot.sessions.filter { $0.activity == .needsYou }.map(\.id))
-        snapshot = fresh
+        snapshots = next
         let current = snapshot.sessions.filter { $0.activity == .needsYou }
         let currentIDs = Set(current.map(\.id))
         notified.subtract(notified.subtracting(currentIDs))
