@@ -131,6 +131,5 @@ import Testing
     #expect(snapshot.availability == .limited)
     #expect(snapshot.windows.isEmpty)
     #expect(snapshot.sessions.isEmpty)
-    #expect(snapshot.notice?.contains("Usage & Billing") == true)
-    #expect(snapshot.notice?.contains("grok.com/dashboard") == true)
+    #expect(snapshot.notice == "Grok Bot doesn't share usage data yet.")
 }
