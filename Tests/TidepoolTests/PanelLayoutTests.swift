@@ -1,7 +1,9 @@
 #if os(macOS)
 import AppKit
+import Darwin
 import ProviderKit
 import QuartzCore
+import ScreenCaptureKit
 import SwiftUI
 import Testing
 @testable import Tidepool
@@ -250,12 +252,15 @@ private final class PanelCaptureWindow {
         window.appearance = appearance
         effect.appearance = appearance
         host.appearance = appearance
-        host.rootView = AnyView(
-            PanelView()
-                .environment(store)
-                .environment(\.colorScheme, scheme)
-                .environment(\.accessibilityReduceMotion, true)
-        )
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            host.rootView = AnyView(
+                PanelView()
+                    .environment(store)
+                    .environment(\.colorScheme, scheme)
+            )
+        }
         window.setContentSize(size)
         host.frame = effect.bounds
         window.orderFrontRegardless()
@@ -264,7 +269,7 @@ private final class PanelCaptureWindow {
         CATransaction.flush()
     }
 
-    func capture() -> (Data, String)? {
+    func capture() async -> (Data, String)? {
         window.setContentSize(size)
         host.frame = effect.bounds
         pump(0.45)
@@ -278,6 +283,9 @@ private final class PanelCaptureWindow {
             }
             if let data = windowImage(windowID: id) {
                 shots.append((data, "CGWindowListCreateImage"))
+            }
+            if let data = await screenshotKit(windowID: id) {
+                shots.append((data, "ScreenCaptureKit"))
             }
             for shot in shots {
                 guard let report = Self.inspect(shot.0, method: shot.1) else { continue }
@@ -426,15 +434,57 @@ private final class PanelCaptureWindow {
         return data
     }
 
+    /// The macOS 26 SDK marks `CGWindowListCreateImage` unavailable and points at
+    /// ScreenCaptureKit. The symbol is still how a test captures one window,
+    /// including its material, so the call goes through the framework directly.
     private func windowImage(windowID: CGWindowID) -> Data? {
-        guard let image = CGWindowListCreateImage(
-            .null,
-            .optionIncludingWindow,
-            windowID,
-            [.boundsIgnoreFraming, .bestResolution]
+        guard let symbol = dlsym(
+            dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY),
+            "CGWindowListCreateImage"
         ) else { return nil }
+        typealias CreateImage = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
+        let create = unsafeBitCast(symbol, to: CreateImage.self)
+        let includingWindow: UInt32 = 1 << 3
+        let ignoreFrameAndBestResolution: UInt32 = (1 << 0) | (1 << 3)
+        guard let image = create(.null, includingWindow, windowID, ignoreFrameAndBestResolution)?.takeRetainedValue() else {
+            return nil
+        }
         let rep = NSBitmapImageRep(cgImage: image)
         return rep.representation(using: .png, properties: [:])
+    }
+
+    private nonisolated func screenshotKit(windowID: CGWindowID) async -> Data? {
+        await withTaskGroup(of: Data?.self) { group in
+            group.addTask { await Self.captureKit(windowID) }
+            group.addTask {
+                try? await Task.sleep(for: .seconds(5))
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+    }
+
+    private nonisolated static func captureKit(_ windowID: CGWindowID) async -> Data? {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+            guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
+                print("ScreenCaptureKit did not list window \(windowID)")
+                return nil
+            }
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            let config = SCStreamConfiguration()
+            config.width = Int(PanelChrome.width * 2)
+            config.height = Int(PanelChrome.height * 2)
+            config.showsCursor = false
+            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+            let rep = NSBitmapImageRep(cgImage: image)
+            return rep.representation(using: .png, properties: [:])
+        } catch {
+            print("ScreenCaptureKit capture failed: \(error)")
+            return nil
+        }
     }
 
     private func pump(_ seconds: TimeInterval) {
@@ -485,7 +535,7 @@ private final class PanelCaptureWindow {
     #expect(PanelInk.contrast(PanelInk.darkLimit, on: PanelInk.darkCanvas) >= 4.5)
 }
 
-@Test @MainActor func panelWindowSizeStaysFixedAcrossProviders() throws {
+@Test @MainActor func panelWindowSizeStaysFixedAcrossProviders() async throws {
     var locked: [CGSize] = []
     var naturalHeights: [String: CGFloat] = [:]
     var lines: [String] = []
@@ -519,7 +569,7 @@ private final class PanelCaptureWindow {
             for scheme in [ColorScheme.light, ColorScheme.dark] {
                 let schemeName = scheme == .dark ? "dark" : "light"
                 capture.show(store: fixture.store, scheme: scheme)
-                let shot = try #require(capture.capture(), "Live window capture failed for \(fixture.name) \(schemeName)")
+                let shot = try #require(await capture.capture(), "Live window capture failed for \(fixture.name) \(schemeName)")
                 let data = shot.0
                 let stats = try #require(PanelCaptureWindow.inspect(data, method: shot.1))
                 let url = folder.appendingPathComponent("\(fixture.name)-\(schemeName).png")
