@@ -376,7 +376,7 @@ struct StaticCredentials: CredentialReading {
     let calls = CallLog()
     let reader = ClaudeCredentialReader(
         security: { service, account in
-            calls.security.append((service, account))
+            calls.security.append(SecurityCall(service: service, account: account))
             return mcp
         },
         keychainItems: { _ in
@@ -391,7 +391,9 @@ struct StaticCredentials: CredentialReading {
         cache: CredentialCache()
     )
     #expect(try reader.accessToken(home: home, now: now) == "sk-ant-oat01-example")
-    #expect(calls.security == [("Claude Code-credentials", "jane")])
+    #expect(calls.security.count == 1)
+    #expect(calls.security.first?.service == "Claude Code-credentials")
+    #expect(calls.security.first?.account == "jane")
     #expect(calls.fileReads == 1)
 }
 
@@ -464,8 +466,13 @@ struct StaticCredentials: CredentialReading {
     #expect(calls.fileReads == 1)
 }
 
+private struct SecurityCall: Equatable {
+    var service: String
+    var account: String?
+}
+
 private final class CallLog: @unchecked Sendable {
-    var security: [(String, String?)] = []
+    var security: [SecurityCall] = []
     var services: [String] = []
     var fileReads = 0
 }
