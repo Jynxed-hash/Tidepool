@@ -1,6 +1,7 @@
 #if os(macOS)
 import AppKit
 import ProviderKit
+import QuartzCore
 import SwiftUI
 import Testing
 @testable import Tidepool
@@ -110,7 +111,7 @@ private enum PanelFixtures {
     private static var claudeSignIn: ProviderSnapshot {
         ProviderSnapshot(
             providerID: ToolCatalog.claudeCode,
-            notice: "Sign in with Claude Code, then open Tidepool again. If you are already signed in, allow the keychain prompt for Claude Code-credentials.",
+            notice: "Sign in with Claude Code, then reopen Tidepool.",
             checkedAt: now
         )
     }
@@ -137,7 +138,7 @@ private enum PanelFixtures {
     private static var grokLimited: ProviderSnapshot {
         ProviderSnapshot(
             providerID: ToolCatalog.grokBot,
-            notice: "Grok Bot doesn't publish a usage figure this app can read. The weekly pool is in Grok Bot under Settings → Usage & Billing, and at grok.com/dashboard. Approval prompts stay in the Grok Bot conversation.",
+            notice: "Grok Bot doesn't share usage data yet.",
             checkedAt: now,
             availability: .limited
         )
@@ -175,58 +176,289 @@ private enum PanelFixtures {
 
 @MainActor
 private enum PanelMeasurer {
-    struct Luminance {
-        var variance: Double
-        var range: Double
-    }
-
     static func fittingSize<V: View>(of view: V) -> CGSize {
         let controller = NSHostingController(rootView: view)
         controller.safeAreaRegions = []
         return controller.sizeThatFits(in: CGSize(width: PanelChrome.width, height: 4_000))
     }
+}
 
-    /// Solid export colors. Glass layers become (0,0,0) in an offscreen bitmap.
-    static func png<V: View>(of view: V, size: CGSize) -> Data? {
-        let rendered = ImageRenderer(
-            content: view.environment(\.panelExport, true)
-        )
-        rendered.scale = 2
-        rendered.proposedSize = ProposedViewSize(width: size.width, height: size.height)
-        rendered.isOpaque = true
-        guard let image = rendered.nsImage else { return nil }
-        return pngData(image)
+/// One on-screen panel. `screencapture -l` and `CGWindowListCreateImage` see the
+/// composited window, including AppKit controls and the material.
+@MainActor
+private final class PanelCaptureWindow {
+    struct Report {
+        var yellowPixels: Int
+        var inkHeight: CGFloat
+        var middleInk: CGFloat
+        var variance: Double
+        var cornerLuminance: Double
+        var method: String
+        var pixelSize: CGSize
     }
 
-    static func luminance(_ data: Data) -> Luminance? {
-        guard let rep = NSBitmapImageRep(data: data), rep.pixelsWide > 0, rep.pixelsHigh > 0 else { return nil }
+    private let window: NSWindow
+    private let effect: NSVisualEffectView
+    private let host: NSHostingView<AnyView>
+    private let size = NSSize(width: PanelChrome.width, height: PanelChrome.height)
+
+    init() {
+        let app = NSApplication.shared
+        if app.activationPolicy() == .prohibited {
+            app.setActivationPolicy(.accessory)
+        }
+        app.activate()
+        window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = false
+        window.level = .floating
+        window.sharingType = .readOnly
+        window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        effect.material = .menu
+        effect.blendingMode = .withinWindow
+        effect.state = .active
+        effect.autoresizingMask = [.width, .height]
+        host = NSHostingView(rootView: AnyView(Color.clear))
+        host.safeAreaRegions = []
+        host.sizingOptions = []
+        host.frame = effect.bounds
+        host.autoresizingMask = [.width, .height]
+        host.wantsLayer = true
+        host.layer?.backgroundColor = NSColor.clear.cgColor
+        host.layer?.isOpaque = false
+        effect.addSubview(host)
+        window.contentView = effect
+        if let screen = NSScreen.main ?? NSScreen.screens.first {
+            let visible = screen.visibleFrame
+            window.setFrameOrigin(NSPoint(
+                x: visible.midX - size.width / 2,
+                y: visible.midY - size.height / 2
+            ))
+        }
+    }
+
+    func show(store: TidepoolStore, scheme: ColorScheme) {
+        let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        window.appearance = appearance
+        effect.appearance = appearance
+        host.appearance = appearance
+        host.rootView = AnyView(
+            PanelView()
+                .environment(store)
+                .environment(\.colorScheme, scheme)
+                .environment(\.accessibilityReduceMotion, true)
+        )
+        window.setContentSize(size)
+        host.frame = effect.bounds
+        window.orderFrontRegardless()
+        host.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        CATransaction.flush()
+    }
+
+    func capture() -> (Data, String)? {
+        window.setContentSize(size)
+        host.frame = effect.bounds
+        pump(0.45)
+        let id = CGWindowID(window.windowNumber)
+        guard id != 0 else { return nil }
+        var best: (Data, String, Report)?
+        for _ in 0..<4 {
+            var shots: [(Data, String)] = []
+            if let data = screenshot(windowID: id) {
+                shots.append((data, "screencapture"))
+            }
+            if let data = windowImage(windowID: id) {
+                shots.append((data, "CGWindowListCreateImage"))
+            }
+            for shot in shots {
+                guard let report = Self.inspect(shot.0, method: shot.1) else { continue }
+                if best == nil || report.inkHeight > best!.2.inkHeight {
+                    best = (shot.0, shot.1, report)
+                }
+                if report.yellowPixels < 24, report.inkHeight > 80, report.variance > 0.002 {
+                    return (shot.0, shot.1)
+                }
+            }
+            pump(0.25)
+            host.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            CATransaction.flush()
+        }
+        if let best { return (best.0, best.1) }
+        return nil
+    }
+
+    func close() {
+        window.orderOut(nil)
+    }
+
+    static func inspect(_ data: Data, method: String) -> Report? {
+        guard let rep = NSBitmapImageRep(data: data), rep.pixelsWide > 8, rep.pixelsHigh > 8 else { return nil }
         let width = rep.pixelsWide
         let height = rep.pixelsHigh
-        let step = max(1, min(width, height) / 80)
+        let scale = Double(width) / Double(PanelChrome.width)
+        let aspect = Double(width) / Double(height)
+        let expectedAspect = Double(PanelChrome.width / PanelChrome.height)
+        guard scale > 0.5, abs(aspect - expectedAspect) < 0.08 else { return nil }
+        var yellow = 0
+        var inkRows = 0
+        var middleRows = 0
         var sum = 0.0
         var sumSquares = 0.0
-        var count = 0.0
-        var lowest = 1.0
-        var highest = 0.0
-        for y in stride(from: 0, to: height, by: step) {
-            for x in stride(from: 0, to: width, by: step) {
-                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-                let sample = 0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
-                sum += sample
-                sumSquares += sample * sample
-                lowest = min(lowest, sample)
-                highest = max(highest, sample)
-                count += 1
+        var samples = 0.0
+        let middleStart = Int(Double(height) * 0.22)
+        let middleEnd = Int(Double(height) * 0.78)
+        let stepX = max(1, width / 160)
+        for y in 0..<height {
+            var lowest = 1.0
+            var highest = 0.0
+            var x = 0
+            while x < width {
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+                    x += stepX
+                    continue
+                }
+                let red = color.redComponent
+                let green = color.greenComponent
+                let blue = color.blueComponent
+                if red > 0.93, green > 0.70, green < 0.90, blue < 0.20, red - blue > 0.7 {
+                    yellow += 1
+                }
+                let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+                lowest = min(lowest, luminance)
+                highest = max(highest, luminance)
+                if y % 4 == 0, x % (stepX * 2) == 0 {
+                    sum += luminance
+                    sumSquares += luminance * luminance
+                    samples += 1
+                }
+                x += stepX
+            }
+            if highest - lowest > 0.12 {
+                inkRows += 1
+                if y >= middleStart, y < middleEnd {
+                    middleRows += 1
+                }
             }
         }
-        guard count > 0 else { return nil }
-        let mean = sum / count
-        return Luminance(variance: sumSquares / count - mean * mean, range: highest - lowest)
+        guard samples > 0 else { return nil }
+        let mean = sum / samples
+        let corner = cornerLuminance(rep)
+        return Report(
+            yellowPixels: yellow,
+            inkHeight: CGFloat(Double(inkRows) / scale),
+            middleInk: CGFloat(Double(middleRows) / scale),
+            variance: sumSquares / samples - mean * mean,
+            cornerLuminance: corner,
+            method: method,
+            pixelSize: CGSize(width: width, height: height)
+        )
     }
 
-    private static func pngData(_ image: NSImage) -> Data? {
+    static func contactSheet(entries: [(name: String, light: Data, dark: Data)]) -> Data? {
+        let cell = NSSize(width: 240, height: 390)
+        let labelWidth: CGFloat = 132
+        let gap: CGFloat = 8
+        let rowHeight = cell.height + 28
+        let width = labelWidth + gap + cell.width * 2 + gap
+        let height = rowHeight * CGFloat(entries.count) + gap
+        let image = NSImage(size: NSSize(width: width, height: height), flipped: true) { bounds in
+            NSColor.black.setFill()
+            bounds.fill()
+            for (index, entry) in entries.enumerated() {
+                let y = gap + CGFloat(index) * rowHeight
+                let title = NSAttributedString(
+                    string: entry.name,
+                    attributes: [
+                        .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+                        .foregroundColor: NSColor.white,
+                    ]
+                )
+                title.draw(in: NSRect(x: 8, y: y + 4, width: labelWidth - 12, height: 20))
+                draw(entry.light, in: NSRect(x: labelWidth, y: y + 24, width: cell.width, height: cell.height))
+                draw(entry.dark, in: NSRect(x: labelWidth + cell.width + gap, y: y + 24, width: cell.width, height: cell.height))
+            }
+            return true
+        }
         guard let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) else { return nil }
         return rep.representation(using: .png, properties: [:])
+    }
+
+    private func screenshot(windowID: CGWindowID) -> Data? {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tidepool-window-\(windowID)-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = ["-l\(windowID)", "-o", "-x", url.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+        } catch {
+            print("screencapture failed to launch: \(error)")
+            return nil
+        }
+        let deadline = Date().addingTimeInterval(6)
+        while process.isRunning, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        if process.isRunning {
+            process.terminate()
+        }
+        let log = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        guard process.terminationStatus == 0,
+              let data = try? Data(contentsOf: url),
+              data.count > 800 else {
+            print("screencapture \(windowID) status \(process.terminationStatus) \(log)")
+            return nil
+        }
+        return data
+    }
+
+    private func windowImage(windowID: CGWindowID) -> Data? {
+        guard let image = CGWindowListCreateImage(
+            .null,
+            .optionIncludingWindow,
+            windowID,
+            [.boundsIgnoreFraming, .bestResolution]
+        ) else { return nil }
+        let rep = NSBitmapImageRep(cgImage: image)
+        return rep.representation(using: .png, properties: [:])
+    }
+
+    private func pump(_ seconds: TimeInterval) {
+        let until = Date().addingTimeInterval(seconds)
+        while Date() < until {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+    }
+
+    private static func cornerLuminance(_ rep: NSBitmapImageRep) -> Double {
+        let limit = min(48, min(rep.pixelsWide, rep.pixelsHigh))
+        var inset = 2
+        while inset < limit {
+            if let color = rep.colorAt(x: inset, y: inset)?.usingColorSpace(.sRGB), color.alphaComponent > 0.5 {
+                return 0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
+            }
+            inset += 2
+        }
+        return 0
+    }
+
+    private static func draw(_ data: Data, in rect: NSRect) {
+        guard let image = NSImage(data: data) else { return }
+        image.draw(in: rect, from: .zero, operation: .copy, fraction: 1)
     }
 }
 
@@ -267,7 +499,6 @@ private enum PanelMeasurer {
             let view = PanelView()
                 .environment(fixture.store)
                 .environment(\.colorScheme, scheme)
-                .environment(\.panelExport, true)
             let size = PanelMeasurer.fittingSize(of: view)
             locked.append(size)
             let schemeName = scheme == .dark ? "dark" : "light"
@@ -278,27 +509,43 @@ private enum PanelMeasurer {
     if let directory = ProcessInfo.processInfo.environment["TIDEPOOL_PANEL_SNAPSHOTS"], !directory.isEmpty {
         let folder = URL(fileURLWithPath: directory, isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        print("screenCaptureAccess=\(CGPreflightScreenCaptureAccess()) screens=\(NSScreen.screens.count)")
+        let capture = PanelCaptureWindow()
+        defer { capture.close() }
+        var sheet: [(name: String, light: Data, dark: Data)] = []
         for fixture in PanelFixtures.cases {
+            var pair: [String: Data] = [:]
+            let natural = naturalHeights[fixture.name] ?? PanelChrome.height
             for scheme in [ColorScheme.light, ColorScheme.dark] {
                 let schemeName = scheme == .dark ? "dark" : "light"
-                let view = PanelView()
-                    .environment(fixture.store)
-                    .environment(\.colorScheme, scheme)
-                    .environment(\.panelExport, true)
-                let data = try #require(
-                    PanelMeasurer.png(
-                        of: view,
-                        size: CGSize(width: PanelChrome.width, height: PanelChrome.height)
-                    )
-                )
-                let stats = try #require(PanelMeasurer.luminance(data))
-                // A glass capture is every pixel (0,0,0): variance and range are both 0.
-                #expect(stats.variance > 0.0005)
-                #expect(stats.range > 0.2)
+                capture.show(store: fixture.store, scheme: scheme)
+                let shot = try #require(capture.capture(), "Live window capture failed for \(fixture.name) \(schemeName)")
+                let data = shot.0
+                let stats = try #require(PanelCaptureWindow.inspect(data, method: shot.1))
                 let url = folder.appendingPathComponent("\(fixture.name)-\(schemeName).png")
                 try data.write(to: url)
-                lines.append("\(fixture.name) \(schemeName) luminanceVariance=\(stats.variance) luminanceRange=\(stats.range)")
+                pair[schemeName] = data
+                let expected = min(natural, PanelChrome.height)
+                lines.append(
+                    "\(fixture.name) \(schemeName) method=\(stats.method) pixels=\(Int(stats.pixelSize.width))x\(Int(stats.pixelSize.height)) yellow=\(stats.yellowPixels) ink=\(stats.inkHeight) middle=\(stats.middleInk) variance=\(stats.variance) corner=\(stats.cornerLuminance) expected=\(expected)"
+                )
+                #expect(stats.yellowPixels < 24, "\(fixture.name) \(schemeName) has placeholder-yellow pixels (\(stats.yellowPixels))")
+                #expect(stats.variance > 0.002, "\(fixture.name) \(schemeName) capture is flat")
+                #expect(stats.inkHeight >= expected * 0.35, "\(fixture.name) \(schemeName) drawn ink \(stats.inkHeight) is far below \(expected)")
+                #expect(stats.middleInk >= 24, "\(fixture.name) \(schemeName) has almost no ink below the header")
+                if scheme == .dark {
+                    #expect(stats.cornerLuminance > 0.02, "\(fixture.name) dark capture is black, so the material did not composite")
+                    #expect(stats.cornerLuminance < 0.55, "\(fixture.name) dark capture is light")
+                } else {
+                    #expect(stats.cornerLuminance > 0.45, "\(fixture.name) light capture is dark")
+                }
             }
+            if let light = pair["light"], let dark = pair["dark"] {
+                sheet.append((name: fixture.name, light: light, dark: dark))
+            }
+        }
+        if let contact = PanelCaptureWindow.contactSheet(entries: sheet) {
+            try contact.write(to: folder.appendingPathComponent("contact-sheet.png"))
         }
         let report = lines.joined(separator: "\n") + "\n"
         try report.write(to: folder.appendingPathComponent("sizes.txt"), atomically: true, encoding: .utf8)

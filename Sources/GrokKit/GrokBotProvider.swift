@@ -10,9 +10,7 @@ public struct GrokBotProvider: UsageProvider {
     public func refresh(_ request: ProviderRefreshRequest) async -> ProviderSnapshot {
         ProviderSnapshot(
             providerID: id,
-            notice: """
-            Grok Bot doesn't publish a usage figure this app can read. The weekly pool is in Grok Bot under Settings → Usage & Billing, and at grok.com/dashboard. Approval prompts stay in the Grok Bot conversation.
-            """,
+            notice: "Grok Bot doesn't share usage data yet.",
             checkedAt: request.now,
             availability: .limited
         )

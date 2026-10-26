@@ -77,19 +77,6 @@ enum PanelInk {
     }
 }
 
-private struct PanelExportKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
-extension EnvironmentValues {
-    /// Screenshot export paints solid colors. Glass and NSVisualEffectView
-    /// composite to black when the window is offscreen.
-    var panelExport: Bool {
-        get { self[PanelExportKey.self] }
-        set { self[PanelExportKey.self] = newValue }
-    }
-}
-
 struct PanelView: View {
     /// Layout tests measure the natural stack with this set to false.
     var locksWindowSize = true
@@ -97,7 +84,6 @@ struct PanelView: View {
     @Environment(TidepoolStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.panelExport) private var panelExport
     @Namespace private var glass
     @State private var contentScrolled = false
 
@@ -118,7 +104,7 @@ struct PanelView: View {
                 maxHeight: PanelChrome.height,
                 alignment: .top
             )
-            .background(panelExport ? PanelInk.canvas(colorScheme) : Color.clear)
+            .background(Color.clear)
             .onChange(of: pageID) { _, _ in contentScrolled = false }
         } else {
             intrinsic
@@ -152,11 +138,6 @@ struct PanelView: View {
                 quietMessage(quiet)
                     .padding(.horizontal, PanelChrome.margin)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if !otherComingSoon.isEmpty {
-                    comingSoonBlock
-                        .padding(.horizontal, PanelChrome.margin)
-                        .padding(.bottom, PanelChrome.grid)
-                }
                 footer
                     .padding(.horizontal, PanelChrome.margin)
                     .padding(.bottom, PanelChrome.margin)
@@ -185,11 +166,6 @@ struct PanelView: View {
                 quietMessage(quiet)
                     .padding(.horizontal, PanelChrome.margin)
                     .padding(.top, PanelChrome.grid)
-                if !otherComingSoon.isEmpty {
-                    comingSoonBlock
-                        .padding(.horizontal, PanelChrome.margin)
-                        .padding(.top, PanelChrome.grid)
-                }
                 footer
                     .padding(.horizontal, PanelChrome.margin)
                     .padding(.top, PanelChrome.grid)
@@ -265,14 +241,13 @@ struct PanelView: View {
 
     private var unofficialBadge: some View {
         Text("Unofficial")
-            .font(.caption2.weight(.semibold))
+            .font(.caption2)
             .foregroundStyle(PanelInk.secondary(colorScheme))
             .padding(.horizontal, PanelChrome.grid)
-            .padding(.vertical, 4)
+            .padding(.vertical, 3)
             .overlay {
                 Capsule().strokeBorder(PanelInk.separator(colorScheme), lineWidth: 1)
             }
-            .frame(minHeight: PanelChrome.control)
             .accessibilityLabel("Unofficial")
     }
 
@@ -304,47 +279,89 @@ struct PanelView: View {
         }
     }
 
-    private var quiet: (symbol: String, title: String, message: String)? {
+    private struct QuietPage {
+        var symbol: String
+        var title: String
+        var message: String
+        var linkTitle: String?
+        var linkURL: URL?
+    }
+
+    private var quiet: QuietPage? {
         if store.selectedIsComingSoon {
-            return (
-                "hourglass",
-                "Coming soon",
-                "\(store.selectedTitle) is on this Mac. Tidepool does not read it yet."
+            return QuietPage(
+                symbol: "hourglass",
+                title: "Coming soon",
+                message: "\(store.selectedTitle) is on this Mac. Tidepool does not read it yet."
             )
         }
         if store.snapshot.availability == .limited {
-            return (
-                "chart.bar.xaxis",
-                "Limited data",
-                store.snapshot.notice ?? "Tidepool can't read a usage figure for \(store.selectedTitle)."
+            if store.snapshot.providerID == ToolCatalog.grokBot {
+                return QuietPage(
+                    symbol: "chart.bar.xaxis",
+                    title: "Limited data",
+                    message: "Grok Bot doesn't share usage data yet.",
+                    linkTitle: "Open dashboard",
+                    linkURL: URL(string: "https://grok.com/dashboard")
+                )
+            }
+            return QuietPage(
+                symbol: "chart.bar.xaxis",
+                title: "Limited data",
+                message: store.snapshot.notice ?? "Tidepool can't read a usage figure for \(store.selectedTitle)."
             )
         }
         let empty = store.snapshot.windows.isEmpty && store.snapshot.sessions.isEmpty
         if empty {
-            let message = store.snapshot.notice
-                ?? store.actionNotice
-                ?? "Sign in to \(store.selectedTitle), then open Tidepool again."
-            return ("person.crop.circle", "Sign in", message)
+            return QuietPage(
+                symbol: "person.crop.circle",
+                title: "Sign in",
+                message: signInMessage
+            )
         }
         return nil
     }
 
-    private func quietMessage(_ quiet: (symbol: String, title: String, message: String)) -> some View {
+    /// Keychain copy is only for a read that was denied. A missing login stays one short sentence.
+    private var signInMessage: String {
+        let notice = store.snapshot.notice ?? store.actionNotice
+        if store.snapshot.providerID == ToolCatalog.claudeCode {
+            if notice?.localizedCaseInsensitiveContains("keychain") == true {
+                return "Allow the keychain prompt for Claude Code-credentials."
+            }
+            if notice == nil || notice?.hasPrefix("Sign in") == true {
+                return "Sign in with Claude Code, then reopen Tidepool."
+            }
+        }
+        return notice ?? "Sign in to \(store.selectedTitle), then open Tidepool again."
+    }
+
+    private func quietMessage(_ quiet: QuietPage) -> some View {
         VStack(spacing: PanelChrome.grid) {
             Image(systemName: quiet.symbol)
                 .font(.system(size: 32))
                 .foregroundStyle(PanelInk.secondary(colorScheme))
-                .frame(minWidth: 32, minHeight: 32)
+                .frame(width: 32, height: 32)
                 .accessibilityHidden(true)
             Text(quiet.title)
                 .font(.headline)
                 .foregroundStyle(PanelInk.primary(colorScheme))
                 .multilineTextAlignment(.center)
             Text(quiet.message)
-                .font(.body)
+                .font(.callout)
                 .foregroundStyle(PanelInk.secondary(colorScheme))
                 .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(2)
+                .frame(maxWidth: 260)
+            if let title = quiet.linkTitle, let url = quiet.linkURL {
+                Button(title) {
+                    NSWorkspace.shared.open(url)
+                }
+                .buttonStyle(.link)
+                .font(.callout)
+                .frame(minHeight: PanelChrome.control)
+                .accessibilityLabel(title)
+            }
         }
         .frame(maxWidth: .infinity)
     }
@@ -368,9 +385,6 @@ struct PanelView: View {
                         if showsSessions {
                             sessions(now: timeline.date)
                         }
-                    }
-                    if !otherComingSoon.isEmpty {
-                        comingSoonBlock
                     }
                     footer
                 }
@@ -417,10 +431,6 @@ struct PanelView: View {
         }
     }
 
-    private var otherComingSoon: [CatalogStatus] {
-        store.comingSoon.filter { $0.id != store.selectedProviderID }
-    }
-
     /// API meters have no session feed. An empty list would look like a failed lookup.
     private var showsSessions: Bool {
         if !store.snapshot.sessions.isEmpty { return true }
@@ -457,17 +467,6 @@ struct PanelView: View {
                         cursorInstalled: store.catalog.contains { $0.id == ToolCatalog.cursor && $0.state != .notDetected && $0.state != .undetectable }
                     )
                 }
-            }
-        }
-    }
-
-    private var comingSoonBlock: some View {
-        VStack(alignment: .leading, spacing: PanelChrome.grid) {
-            sectionHeader("On this Mac")
-            ForEach(otherComingSoon) { tool in
-                Text("\(tool.displayName) · coming soon")
-                    .font(.caption)
-                    .foregroundStyle(PanelInk.secondary(colorScheme))
             }
         }
     }
@@ -511,14 +510,9 @@ struct PanelView: View {
         }
     }
 
-    @ViewBuilder
     private func panelGlass<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        if panelExport {
+        GlassEffectContainer(spacing: PanelChrome.grid) {
             content()
-        } else {
-            GlassEffectContainer(spacing: PanelChrome.grid) {
-                content()
-            }
         }
     }
 }
@@ -742,39 +736,19 @@ struct BranchLabel: View {
 }
 
 private struct PanelIconButtonModifier: ViewModifier {
-    @Environment(\.panelExport) private var panelExport
-    @Environment(\.colorScheme) private var colorScheme
-
     func body(content: Content) -> some View {
-        if panelExport {
-            content
-                .buttonStyle(.borderless)
-                .foregroundStyle(PanelInk.secondary(colorScheme))
-                .background(PanelInk.raised(colorScheme), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(PanelInk.separator(colorScheme), lineWidth: 1)
-                }
-        } else {
-            content.buttonStyle(.glass)
-        }
+        content.buttonStyle(.glass)
     }
 }
 
 private struct TidepoolGlassModifier<S: Shape>: ViewModifier {
-    @Environment(\.panelExport) private var panelExport
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
     var id: String
     var namespace: Namespace.ID
     var shape: S
 
     func body(content: Content) -> some View {
-        if panelExport {
-            content
-                .background(PanelInk.raised(colorScheme), in: shape)
-                .overlay { shape.stroke(PanelInk.separator(colorScheme), lineWidth: 1) }
-        } else if reduceMotion {
+        if reduceMotion {
             content
                 .glassEffect(.regular.interactive(), in: shape)
                 .glassEffectID(id, in: namespace)
