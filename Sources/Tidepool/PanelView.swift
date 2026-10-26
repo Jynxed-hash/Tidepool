@@ -439,13 +439,13 @@ struct PanelView: View {
                 sectionHeader("Sessions")
                 Spacer()
                 Text(sessionCount)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(PanelInk.secondary(colorScheme))
                     .monospacedDigit()
             }
             if store.snapshot.sessions.isEmpty {
                 Text("No sessions right now.")
-                    .font(.body)
+                    .font(.caption)
                     .foregroundStyle(PanelInk.secondary(colorScheme))
             } else {
                 ForEach(store.snapshot.sessions.prefix(6)) { session in
@@ -466,7 +466,7 @@ struct PanelView: View {
             sectionHeader("On this Mac")
             ForEach(otherComingSoon) { tool in
                 Text("\(tool.displayName) · coming soon")
-                    .font(.body)
+                    .font(.caption)
                     .foregroundStyle(PanelInk.secondary(colorScheme))
             }
         }
@@ -495,7 +495,7 @@ struct PanelView: View {
         HStack(alignment: .center, spacing: PanelChrome.grid) {
             if showsToday {
                 Text(TokenFormat.todayLine(store.snapshot.today))
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(PanelInk.secondary(colorScheme))
                     .monospacedDigit()
             }
@@ -551,9 +551,9 @@ struct UsageRow: View {
                     .foregroundStyle(window.isAtLimit ? PanelInk.limit(colorScheme) : PanelInk.primary(colorScheme))
             }
             UsageBar(percent: window.usedPercent)
-                .padding(.vertical, PanelChrome.grid)
+                .padding(.vertical, 4)
             Text(meta)
-                .font(.subheadline)
+                .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(window.isNearLimit ? PanelInk.primary(colorScheme) : PanelInk.secondary(colorScheme))
         }
@@ -625,14 +625,14 @@ struct SessionRow: View {
                         }
                         Spacer(minLength: PanelChrome.grid)
                         Text(statusText)
-                            .font(.subheadline)
+                            .font(.caption)
                             .monospacedDigit()
                             .foregroundStyle(session.activity == .needsYou ? PanelInk.needsYou(colorScheme) : PanelInk.secondary(colorScheme))
                     }
                     .frame(minHeight: PanelChrome.control)
                     if expanded, let waiting = waitingLine {
                         Text(waiting)
-                            .font(.subheadline)
+                            .font(.caption)
                             .foregroundStyle(PanelInk.secondary(colorScheme))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
