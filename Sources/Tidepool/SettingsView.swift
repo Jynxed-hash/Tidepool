@@ -3,36 +3,22 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(TidepoolStore.self) private var store
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Button {
-                    withAnimation(reduceMotion ? nil : .smooth) {
-                        store.showingSettings = false
-                    }
-                } label: {
-                    Image(systemName: "chevron.backward")
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Back")
-                Text("Settings")
-                    .font(.body.weight(.semibold))
-                Spacer()
-            }
-            Toggle("Notifications when a session needs you", isOn: notifications)
-            Toggle("Launch at login", isOn: launch)
-            Toggle("Claude Code hooks", isOn: hooks)
-            Toggle("Unofficial providers", isOn: unofficial)
+        VStack(alignment: .leading, spacing: PanelChrome.grid) {
+            toggle("Notifications when a session needs you", isOn: notifications)
+            toggle("Launch at login", isOn: launch)
+            toggle("Claude Code hooks", isOn: hooks)
+            toggle("Unofficial providers", isOn: unofficial)
             Text("Cursor and GitHub Copilot use undocumented endpoints. Turning this off skips those calls.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(.body)
+                .foregroundStyle(PanelInk.secondary(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: PanelChrome.grid) {
                 Text("Menu bar")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(PanelInk.secondary(colorScheme))
                 Picker("Menu bar", selection: format) {
                     ForEach(MenuBarFormat.allCases) { item in
                         Text(item.title).tag(item)
@@ -40,41 +26,54 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.radioGroup)
                 .labelsHidden()
+                .controlSize(.large)
             }
             Stepper(value: refresh, in: 60...600, step: 30) {
                 Text("Refresh every \(Int(store.refreshSeconds))s")
                     .font(.body)
+                    .foregroundStyle(PanelInk.primary(colorScheme))
                     .monospacedDigit()
             }
+            .frame(minHeight: PanelChrome.control)
             if let burn = store.snapshot.today.blockTokensPerHour {
                 Text("Current block ≈ \(TokenFormat.compact(Int(burn))) tokens/hour (est.)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .foregroundStyle(PanelInk.secondary(colorScheme))
                     .monospacedDigit()
             }
-            Divider()
             Text("Tools")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(PanelInk.secondary(colorScheme))
+                .padding(.top, PanelChrome.grid)
             ForEach(store.catalog) { tool in
                 HStack {
                     Text(tool.displayName)
                         .font(.body)
+                        .foregroundStyle(PanelInk.primary(colorScheme))
                     Spacer()
                     Text(label(tool))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                        .foregroundStyle(PanelInk.secondary(colorScheme))
                 }
+                .frame(minHeight: PanelChrome.control)
             }
             if let notice = store.actionNotice {
                 Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.body)
+                    .foregroundStyle(PanelInk.secondary(colorScheme))
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(width: 320)
+        .padding(.horizontal, PanelChrome.margin)
+        .padding(.bottom, PanelChrome.margin)
+        .frame(width: PanelChrome.width, alignment: .topLeading)
+    }
+
+    private func toggle(_ title: String, isOn: Binding<Bool>) -> some View {
+        Toggle(title, isOn: isOn)
+            .font(.body)
+            .foregroundStyle(PanelInk.primary(colorScheme))
+            .frame(minHeight: PanelChrome.control)
+            .controlSize(.large)
     }
 
     private var notifications: Binding<Bool> {

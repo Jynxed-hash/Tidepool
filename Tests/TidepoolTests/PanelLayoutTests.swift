@@ -175,38 +175,53 @@ private enum PanelFixtures {
 
 @MainActor
 private enum PanelMeasurer {
+    struct Luminance {
+        var variance: Double
+        var range: Double
+    }
+
     static func fittingSize<V: View>(of view: V) -> CGSize {
         let controller = NSHostingController(rootView: view)
         controller.safeAreaRegions = []
         return controller.sizeThatFits(in: CGSize(width: PanelChrome.width, height: 4_000))
     }
 
+    /// Solid export colors. Glass layers become (0,0,0) in an offscreen bitmap.
     static func png<V: View>(of view: V, size: CGSize) -> Data? {
-        let rendered = ImageRenderer(content: view)
+        let rendered = ImageRenderer(
+            content: view.environment(\.panelExport, true)
+        )
         rendered.scale = 2
         rendered.proposedSize = ProposedViewSize(width: size.width, height: size.height)
-        rendered.isOpaque = false
-        if let image = rendered.nsImage, let data = pngData(image), !data.isEmpty {
-            return data
-        }
-        return rasterized(view, size: size)
+        rendered.isOpaque = true
+        guard let image = rendered.nsImage else { return nil }
+        return pngData(image)
     }
 
-    private static func rasterized<V: View>(_ view: V, size: CGSize) -> Data? {
-        let host = NSHostingView(rootView: view)
-        host.frame = CGRect(origin: .zero, size: size)
-        let window = NSWindow(
-            contentRect: host.frame,
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.contentView = host
-        host.layoutSubtreeIfNeeded()
-        window.layoutIfNeeded()
-        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
-        host.cacheDisplay(in: host.bounds, to: rep)
-        return rep.representation(using: .png, properties: [:])
+    static func luminance(_ data: Data) -> Luminance? {
+        guard let rep = NSBitmapImageRep(data: data), rep.pixelsWide > 0, rep.pixelsHigh > 0 else { return nil }
+        let width = rep.pixelsWide
+        let height = rep.pixelsHigh
+        let step = max(1, min(width, height) / 80)
+        var sum = 0.0
+        var sumSquares = 0.0
+        var count = 0.0
+        var lowest = 1.0
+        var highest = 0.0
+        for y in stride(from: 0, to: height, by: step) {
+            for x in stride(from: 0, to: width, by: step) {
+                guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let sample = 0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
+                sum += sample
+                sumSquares += sample * sample
+                lowest = min(lowest, sample)
+                highest = max(highest, sample)
+                count += 1
+            }
+        }
+        guard count > 0 else { return nil }
+        let mean = sum / count
+        return Luminance(variance: sumSquares / count - mean * mean, range: highest - lowest)
     }
 
     private static func pngData(_ image: NSImage) -> Data? {
@@ -222,20 +237,37 @@ private enum PanelMeasurer {
     #expect(store.selectedIsComingSoon)
 }
 
+@Test func panelTextClearsContrast() {
+    #expect(PanelChrome.width == 320)
+    #expect(PanelChrome.height == 520)
+    #expect(PanelChrome.margin == 16)
+    #expect(PanelChrome.grid == 8)
+    #expect(PanelChrome.control == 28)
+    #expect(PanelInk.contrast(PanelInk.lightSecondary, on: PanelInk.lightCanvas) >= 4.5)
+    #expect(PanelInk.contrast(PanelInk.darkSecondary, on: PanelInk.darkCanvas) >= 4.5)
+    #expect(PanelInk.contrast((0, 0, 0), on: PanelInk.lightCanvas) >= 4.5)
+    #expect(PanelInk.contrast((1, 1, 1), on: PanelInk.darkCanvas) >= 4.5)
+    #expect(PanelInk.contrast(PanelInk.lightNeedsYou, on: PanelInk.lightCanvas) >= 4.5)
+    #expect(PanelInk.contrast(PanelInk.darkNeedsYou, on: PanelInk.darkCanvas) >= 4.5)
+    #expect(PanelInk.contrast(PanelInk.lightLimit, on: PanelInk.lightCanvas) >= 4.5)
+    #expect(PanelInk.contrast(PanelInk.darkLimit, on: PanelInk.darkCanvas) >= 4.5)
+}
+
 @Test @MainActor func panelWindowSizeStaysFixedAcrossProviders() throws {
     var locked: [CGSize] = []
-    var naturalHeights: [CGFloat] = []
+    var naturalHeights: [String: CGFloat] = [:]
     var lines: [String] = []
 
     for fixture in PanelFixtures.cases {
         let natural = PanelMeasurer.fittingSize(
             of: PanelView(locksWindowSize: false).environment(fixture.store)
         )
-        naturalHeights.append(natural.height)
+        naturalHeights[fixture.name] = natural.height
         for scheme in [ColorScheme.light, ColorScheme.dark] {
             let view = PanelView()
                 .environment(fixture.store)
                 .environment(\.colorScheme, scheme)
+                .environment(\.panelExport, true)
             let size = PanelMeasurer.fittingSize(of: view)
             locked.append(size)
             let schemeName = scheme == .dark ? "dark" : "light"
@@ -252,14 +284,20 @@ private enum PanelMeasurer {
                 let view = PanelView()
                     .environment(fixture.store)
                     .environment(\.colorScheme, scheme)
+                    .environment(\.panelExport, true)
                 let data = try #require(
                     PanelMeasurer.png(
                         of: view,
                         size: CGSize(width: PanelChrome.width, height: PanelChrome.height)
                     )
                 )
+                let stats = try #require(PanelMeasurer.luminance(data))
+                // A glass capture is every pixel (0,0,0): variance and range are both 0.
+                #expect(stats.variance > 0.0005)
+                #expect(stats.range > 0.2)
                 let url = folder.appendingPathComponent("\(fixture.name)-\(schemeName).png")
                 try data.write(to: url)
+                lines.append("\(fixture.name) \(schemeName) luminanceVariance=\(stats.variance) luminanceRange=\(stats.range)")
             }
         }
         let report = lines.joined(separator: "\n") + "\n"
@@ -273,7 +311,10 @@ private enum PanelMeasurer {
         #expect(abs(size.width - first.width) < 0.5)
         #expect(abs(size.height - first.height) < 0.5)
     }
-    let spread = (naturalHeights.max() ?? 0) - (naturalHeights.min() ?? 0)
+    let heights = Array(naturalHeights.values)
+    let spread = (heights.max() ?? 0) - (heights.min() ?? 0)
     #expect(spread > 40)
+    let claude = try #require(naturalHeights["claude-ready"])
+    #expect(claude <= PanelChrome.height + 0.5)
 }
 #endif

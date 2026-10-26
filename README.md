@@ -2,7 +2,7 @@
 
 A macOS 26 menu bar app for AI usage limits. Claude Code is the session view: the 5-hour and weekly limits, when they reset, and which session is waiting on you. Codex, OpenRouter, Gemini CLI, OpenCode, z.ai, and DeepSeek add the meters their own docs or clients actually expose. Cursor and GitHub Copilot are unofficial: community endpoints, labeled Unofficial, and off when Settings → Unofficial providers is off.
 
-The panel follows the Floating Needs-you mockup: light on the left, dark on the right, example data. The menu-bar window stays 320×480 points. Switching providers crossfades inside that box: shorter states stay top-aligned, and taller ones scroll.
+The panel follows the Floating Needs-you mockup: light on the left, dark on the right, example data. The menu-bar window stays 320×520 points. Switching providers crossfades inside that box. Pages with usage stay top-aligned. Sign-in, limited-data, and coming-soon states are centered under the provider switcher. Taller pages scroll.
 
 ![Floating Needs-you mockup, light and dark, example data](mockups/glass-b.png)
 
