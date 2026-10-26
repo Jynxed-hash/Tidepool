@@ -42,13 +42,13 @@ scripts/assemble-app.sh
 open dist/Tidepool.app
 ```
 
-`scripts/assemble-app.sh` runs `swift build -c release --product Tidepool --product cmb-hook` and wraps the binaries. They also remain at `.build/release/Tidepool` and `.build/release/cmb-hook`. The bundle is `dist/Tidepool.app`. `LSUIElement` is set, so it has no Dock icon. Look for the gauge in the menu bar, including the menu-bar overflow.
+`scripts/assemble-app.sh` builds `Tidepool` and `cmb-hook` separately and wraps the binaries. The bundle is `dist/Tidepool.app`. `LSUIElement` is set, so it has no Dock icon. Look for the gauge in the menu bar, including the menu-bar overflow. See [Building locally and CI](#building-locally-and-ci).
 
 `swift run Tidepool` also launches it, and that process shows a Dock icon because the SwiftPM run does not use the bundle's `Info.plist`.
 
 Then open Tidepool and turn on **Claude Code hooks** in Settings. That copies `cmb-hook` into `~/Library/Application Support/Tidepool/`, backs up `~/.claude/settings.json` under `~/.claude/tidepool-backups/`, and merges hook entries. Running it again does not duplicate them. Turning the switch off removes only Tidepool's entries and restores a status line Tidepool replaced.
 
-Tidepool reads the Claude Code token from the Keychain item `Claude Code-credentials` or from `~/.claude/.credentials.json`. It does not copy the token and it does not refresh it. If the token is expired, open Claude Code once and let it refresh.
+Tidepool reads the Claude Code token from the login Keychain item `Claude Code-credentials` (account: your macOS user name) by running `security find-generic-password`, then from `~/.claude/.credentials.json` if the keychain has no login token. The first successful read can show a macOS prompt from `security`; choose Always Allow. An `mcpOAuth`-only item that shares that service name is skipped. Tidepool does not copy the token and it does not refresh it. If the token is expired, open Claude Code once and let it refresh.
 
 ### Signed DMG and Homebrew
 
@@ -218,9 +218,22 @@ Put a GitHub `oauth_token` in `~/.config/github-copilot/apps.json` (or the older
 
 The switch is on unless you turn it off. Turn it off: Cursor and GitHub Copilot leave the header menu, their calls stop, and Settings lists a detected install as **Off**. Turn it on: they return on the next refresh, and the selected one shows the badge again. Claude Code, Codex, and the API-key meters stay available either way.
 
-## Develop
+## Building locally and CI
 
-GitHub Actions runs `swift test` and `swift build -c release --product Tidepool --product cmb-hook` on `macos-26`. A Linux checkout can run `swift test` (the SwiftUI app is not part of the package there). It cannot compile the menu bar app.
+On a Mac with Xcode selected (`xcode-select -p`), from the repo root:
+
+```bash
+swift build
+swift test
+scripts/assemble-app.sh
+open dist/Tidepool.app
+```
+
+`scripts/assemble-app.sh` runs one `swift build -c release --product …` per executable. A single invocation that passes both `--product Tidepool` and `--product cmb-hook` builds only the last product. The script copies from `swift build -c release --show-bin-path`. That path is absolute. On Xcode 27 it is `.build/out/Products/Release` under the checkout, not `.build/release`. The script exits with a message if either binary is missing.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request, on the `xcode-27` runner. That image is the latest hosted macOS image whose Xcode can build this package (`swift-tools-version` 6.2, `LSMinimumSystemVersion` 26). The job selects an Xcode, prints `xcodebuild -version` and `swift --version`, then runs `swift build`, `swift test`, and `scripts/assemble-app.sh`. It checks that `dist/Tidepool.app/Contents/MacOS` contains `Tidepool` and `cmb-hook`, that `Info.plist` passes `plutil -lint`, and that `codesign --verify` succeeds after an ad-hoc signature. The zipped app is uploaded as the `Tidepool` artifact. Ad-hoc signing is not notarization.
+
+A Linux checkout can run `swift test`. The SwiftUI app is not part of the package there, so it cannot compile the menu bar app.
 
 ## License
 

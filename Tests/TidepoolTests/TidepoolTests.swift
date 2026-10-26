@@ -322,6 +322,161 @@ struct StaticCredentials: CredentialReading {
     #expect(fallback.notice?.contains("Sign in") == true)
 }
 
+@Test func credentialsReadOauthBesideMcpStateAndBareToken() throws {
+    let now = Date(timeIntervalSince1970: 1_761_150_000)
+    let future = Int(now.addingTimeInterval(3600).timeIntervalSince1970 * 1000)
+    let combined = """
+    {"claudeAiOauth":{"accessToken":"sk-ant-oat01-example","expiresAt":\(future)},"mcpOAuth":{"plugin":{"accessToken":"not-the-login"}}}
+    """.data(using: .utf8)!
+    #expect(try CredentialFile.accessToken(from: combined, now: now) == "sk-ant-oat01-example")
+    let bare = """
+    {"accessToken":"sk-ant-oat01-bare","expiresAt":\(future),"refreshToken":"rt"}
+    """.data(using: .utf8)!
+    #expect(try CredentialFile.accessToken(from: bare, now: now) == "sk-ant-oat01-bare")
+    let mcpOnly = #"{"mcpOAuth":{"srv":{"accessToken":""}}}"#.data(using: .utf8)!
+    #expect(throws: CredentialError.notFound) {
+        try CredentialFile.accessToken(from: mcpOnly, now: now)
+    }
+}
+
+@Test func credentialNamesMatchClaudeCodeKeychainLabels() {
+    #expect(ClaudeCredentialNames.accountLabel(user: "jane") == "jane")
+    #expect(ClaudeCredentialNames.accountLabel(user: "jane.doe") == "jane.doe")
+    #expect(ClaudeCredentialNames.accountLabel(user: "jane doe") == "claude-code-user")
+    #expect(ClaudeCredentialNames.accountLabel(user: "") == "claude-code-user")
+    #expect(ClaudeCredentialNames.accountLabel(user: nil) == "claude-code-user")
+    #expect(ClaudeCredentialNames.serviceName(configDirectory: nil) == "Claude Code-credentials")
+    #expect(ClaudeCredentialNames.serviceName(configDirectory: "") == "Claude Code-credentials")
+    #expect(ClaudeCredentialNames.serviceName(configDirectory: "abc") == "Claude Code-credentials-ba7816bf")
+    #expect(SHA256Digest.hex(Data()) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    let composed = "caf\u{00e9}"
+    let decomposed = "cafe\u{0301}"
+    #expect(
+        ClaudeCredentialNames.serviceName(configDirectory: composed)
+            == ClaudeCredentialNames.serviceName(configDirectory: decomposed)
+    )
+    #expect(ClaudeCredentialNames.secureConfigDirectory(environment: [
+        "CLAUDE_CONFIG_DIR": "/tmp/claude-alt",
+        "CLAUDE_SECURESTORAGE_CONFIG_DIR": "",
+    ]) == nil)
+    #expect(ClaudeCredentialNames.secureConfigDirectory(environment: [
+        "CLAUDE_CONFIG_DIR": "/tmp/claude-alt",
+    ]) == "/tmp/claude-alt")
+}
+
+@Test func credentialReaderSkipsMcpItemAndUsesTheCredentialsFile() throws {
+    let now = Date(timeIntervalSince1970: 1_761_150_000)
+    let future = Int(now.addingTimeInterval(3600).timeIntervalSince1970 * 1000)
+    let mcp = #"{"mcpOAuth":{"srv":{}}}"#.data(using: .utf8)!
+    let login = """
+    {"claudeAiOauth":{"accessToken":"sk-ant-oat01-example","expiresAt":\(future)}}
+    """.data(using: .utf8)!
+    let home = URL(fileURLWithPath: "/Users/jane", isDirectory: true)
+    let fileURL = home.appendingPathComponent(".claude/.credentials.json")
+    let calls = CallLog()
+    let reader = ClaudeCredentialReader(
+        security: { service, account in
+            calls.security.append(SecurityCall(service: service, account: account))
+            return mcp
+        },
+        keychainItems: { _ in
+            [KeychainItem(account: "unknown", data: mcp)]
+        },
+        file: { url in
+            calls.fileReads += 1
+            return url.standardizedFileURL.path == fileURL.standardizedFileURL.path ? login : nil
+        },
+        environment: [:],
+        user: "jane",
+        cache: CredentialCache()
+    )
+    #expect(try reader.accessToken(home: home, now: now) == "sk-ant-oat01-example")
+    #expect(calls.security.count == 1)
+    #expect(calls.security.first?.service == "Claude Code-credentials")
+    #expect(calls.security.first?.account == "jane")
+    #expect(calls.fileReads == 1)
+}
+
+@Test func credentialReaderPrefersTheUserKeychainItemOverAnEarlierMcpItem() throws {
+    let now = Date(timeIntervalSince1970: 1_761_150_000)
+    let future = Int(now.addingTimeInterval(3600).timeIntervalSince1970 * 1000)
+    let mcp = #"{"mcpOAuth":{"srv":{}}}"#.data(using: .utf8)!
+    let login = """
+    {"claudeAiOauth":{"accessToken":"sk-ant-oat01-from-keychain","expiresAt":\(future)}}
+    """.data(using: .utf8)!
+    let calls = CallLog()
+    let reader = ClaudeCredentialReader(
+        security: { _, _ in nil },
+        keychainItems: { service in
+            calls.services.append(service)
+            return [
+                KeychainItem(account: "unknown", data: mcp),
+                KeychainItem(account: "jane", data: login),
+            ]
+        },
+        file: { _ in
+            calls.fileReads += 1
+            return nil
+        },
+        environment: ["CLAUDE_CONFIG_DIR": "abc"],
+        user: "jane",
+        cache: CredentialCache()
+    )
+    let token = try reader.accessToken(home: URL(fileURLWithPath: "/Users/jane"), now: now)
+    #expect(token == "sk-ant-oat01-from-keychain")
+    #expect(calls.services == ["Claude Code-credentials-ba7816bf"])
+    #expect(calls.fileReads == 0)
+}
+
+@Test func credentialReaderReportsExpiredInsteadOfMissing() {
+    let expired = #"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-example","expiresAt":100}}"#.data(using: .utf8)!
+    let reader = ClaudeCredentialReader(
+        security: { _, _ in expired },
+        keychainItems: { _ in [] },
+        file: { _ in nil },
+        environment: [:],
+        user: "jane",
+        cache: CredentialCache()
+    )
+    #expect(throws: CredentialError.expired) {
+        try reader.accessToken(home: URL(fileURLWithPath: "/Users/jane"), now: Date())
+    }
+}
+
+@Test func credentialReaderCachesALiveTokenUntilItExpires() throws {
+    let now = Date(timeIntervalSince1970: 1_761_150_000)
+    let future = Int(now.addingTimeInterval(3600).timeIntervalSince1970 * 1000)
+    let login = """
+    {"claudeAiOauth":{"accessToken":"sk-ant-oat01-example","expiresAt":\(future)}}
+    """.data(using: .utf8)!
+    let calls = CallLog()
+    let reader = ClaudeCredentialReader(
+        security: { _, _ in
+            calls.fileReads += 1
+            return login
+        },
+        keychainItems: { _ in [] },
+        file: { _ in nil },
+        environment: [:],
+        user: "jane",
+        cache: CredentialCache()
+    )
+    #expect(try reader.accessToken(home: URL(fileURLWithPath: "/Users/jane"), now: now) == "sk-ant-oat01-example")
+    #expect(try reader.accessToken(home: URL(fileURLWithPath: "/Users/jane"), now: now.addingTimeInterval(10)) == "sk-ant-oat01-example")
+    #expect(calls.fileReads == 1)
+}
+
+private struct SecurityCall: Equatable {
+    var service: String
+    var account: String?
+}
+
+private final class CallLog: @unchecked Sendable {
+    var security: [SecurityCall] = []
+    var services: [String] = []
+    var fileReads = 0
+}
+
 @Test func todayFooterFormatsAnEstimate() {
     let estimate = UsageEstimate(tokens: 1_800_000, costUSD: Decimal(string: "14.20"), origin: .estimate)
     #expect(TokenFormat.todayLine(estimate) == "Today ≈ 1.8M tokens · ≈ $14.20")

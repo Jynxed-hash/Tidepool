@@ -56,4 +56,4 @@ Keep the panel on the design in `README.md`: monochrome, flat bars, orange only 
 
 Add fixtures as strings in `TidepoolTests`. Parse them with no network. Include a null window, a missing file, and a payload that must not retain prompt text.
 
-`swift test` is the check that runs without the macOS 26 SDK. The app target is compiled on the `macos-26` GitHub Actions runner.
+`swift test` is the check that runs without the macOS 26 SDK. The app target is compiled on the `xcode-27` GitHub Actions runner. See the Building locally and CI section in `README.md`.
