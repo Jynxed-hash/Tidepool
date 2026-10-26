@@ -3,6 +3,10 @@ import CoreGraphics
 import Testing
 @testable import Tidepool
 
+private func expectClose(_ actual: CGFloat, _ expected: CGFloat) {
+    #expect(abs(actual - expected) < 0.001)
+}
+
 @Test func allowanceMarkMatchesTheStaticSvgWithoutUsage() {
     let widths = AllowanceMark.widths(usedPercent: nil, needsYou: false)
     #expect(widths == [10.5, 8, 5])
@@ -32,13 +36,13 @@ import Testing
 
     let full = AllowanceMark.widths(usedPercent: 0, needsYou: false)
     #expect(full[0] == 14)
-    #expect(full[1] == 14 * (8 / 10.5))
-    #expect(full[2] == 14 * (5 / 10.5))
+    expectClose(full[1], 14 * (8 / 10.5))
+    expectClose(full[2], 14 * (5 / 10.5))
 
     let half = AllowanceMark.widths(usedPercent: 50, needsYou: false)
     #expect(half[0] == 7)
-    #expect(half[1] == 7 * (8 / 10.5))
-    #expect(half[2] == 7 * (5 / 10.5))
+    expectClose(half[1], 7 * (8 / 10.5))
+    expectClose(half[2], 7 * (5 / 10.5))
 
     #expect(AllowanceMark.widths(usedPercent: 100, needsYou: false) == [3, 3, 3])
     #expect(AllowanceMark.widths(usedPercent: 140, needsYou: false) == [3, 3, 3])
