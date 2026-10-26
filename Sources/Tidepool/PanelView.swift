@@ -22,7 +22,8 @@ struct PanelView: View {
             GlassEffectContainer(spacing: 8) {
                 VStack(alignment: .leading, spacing: 0) {
                     header
-                    if let attention = store.snapshot.sessions.first(where: { $0.activity == .needsYou }) {
+                    if store.snapshot.availability != .limited,
+                       let attention = store.snapshot.sessions.first(where: { $0.activity == .needsYou }) {
                         attentionPill(attention)
                             .padding(.bottom, 12)
                     }
@@ -33,8 +34,12 @@ struct PanelView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.bottom, 8)
                     }
-                    usage(now: timeline.date)
-                    sessions(now: timeline.date)
+                    if store.snapshot.availability != .limited {
+                        usage(now: timeline.date)
+                        if showsSessions {
+                            sessions(now: timeline.date)
+                        }
+                    }
                     if !store.comingSoon.isEmpty {
                         Divider().padding(.vertical, 8)
                         Text("On this Mac")
@@ -60,10 +65,12 @@ struct PanelView: View {
     }
 
     private var header: some View {
-        HStack {
-            Text("Claude Code")
-                .font(.body.weight(.semibold))
-            Spacer()
+        HStack(spacing: 6) {
+            providerTitle
+            if store.selectedIsUnofficial {
+                unofficialBadge
+            }
+            Spacer(minLength: 8)
             Button {
                 Task { await store.setNotifications(enabled: !store.notificationsEnabled) }
             } label: {
@@ -74,6 +81,42 @@ struct PanelView: View {
             .accessibilityLabel(store.notificationsEnabled ? "Notifications on" : "Notifications off")
         }
         .padding(.bottom, 10)
+    }
+
+    private var unofficialBadge: some View {
+        Text("Unofficial")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .overlay {
+                Capsule().strokeBorder(Color.secondary.opacity(0.45), lineWidth: 0.5)
+            }
+            .accessibilityLabel("Unofficial")
+    }
+
+    @ViewBuilder
+    private var providerTitle: some View {
+        if store.providerChoices.count > 1 {
+            Menu {
+                ForEach(store.providerChoices) { tool in
+                    Button(tool.displayName) { store.selectProvider(tool.id) }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(store.selectedTitle)
+                        .font(.body.weight(.semibold))
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Provider, \(store.selectedTitle)")
+        } else {
+            Text(store.selectedTitle)
+                .font(.body.weight(.semibold))
+        }
     }
 
     private func attentionPill(_ session: TrackedSession) -> some View {
@@ -102,9 +145,11 @@ struct PanelView: View {
     private func usage(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if store.snapshot.windows.isEmpty {
-                Text("Usage appears after Claude Code is signed in.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if store.snapshot.providerID == ToolCatalog.claudeCode {
+                    Text("Usage appears after Claude Code is signed in.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 ForEach(store.snapshot.windows) { window in
                     UsageRow(window: window, now: now)
@@ -112,6 +157,18 @@ struct PanelView: View {
             }
         }
         .padding(.bottom, 12)
+    }
+
+    /// API meters have no session feed. An empty list would look like a failed lookup.
+    private var showsSessions: Bool {
+        if !store.snapshot.sessions.isEmpty { return true }
+        switch store.snapshot.providerID {
+        case ToolCatalog.openRouter, ToolCatalog.geminiCLI, ToolCatalog.openCode, ToolCatalog.zai, ToolCatalog.deepSeek,
+            ToolCatalog.cursor, ToolCatalog.copilot:
+            return false
+        default:
+            return true
+        }
     }
 
     private func sessions(now: Date) -> some View {
@@ -150,12 +207,20 @@ struct PanelView: View {
         return count == 1 ? "1 active" : "\(count) active"
     }
 
+    private var showsToday: Bool {
+        if store.snapshot.availability == .limited { return false }
+        if store.snapshot.providerID == ToolCatalog.claudeCode { return true }
+        return store.snapshot.today.tokens > 0 || store.snapshot.today.costUSD != nil
+    }
+
     private var footer: some View {
         HStack(alignment: .center) {
-            Text(TokenFormat.todayLine(store.snapshot.today))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+            if showsToday {
+                Text(TokenFormat.todayLine(store.snapshot.today))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
             Spacer(minLength: 8)
             Button {
                 withAnimation(animation) { store.showingSettings.toggle() }
@@ -308,10 +373,15 @@ struct SessionRow: View {
     }
 
     private var statusText: String {
+        let estimated = session.origin == .estimate
         switch session.activity {
-        case .needsYou: "Needs you"
-        case .working: "Working"
-        case .idle: IdleFormat.label(since: session.idleSince, now: now)
+        case .needsYou:
+            return estimated ? "Needs you (est.)" : "Needs you"
+        case .working:
+            return estimated ? "Working (est.)" : "Working"
+        case .idle:
+            let label = IdleFormat.label(since: session.idleSince, now: now)
+            return estimated ? "\(label) (est.)" : label
         }
     }
 

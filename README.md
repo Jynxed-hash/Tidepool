@@ -1,6 +1,6 @@
 # Tidepool
 
-A macOS 26 menu bar app for AI usage limits. This build reads **Claude Code**. Cursor, Codex, and Wispr Flow are detected and labeled **coming soon**. Grok Bot has no cited install marker, so it is not reported as installed.
+A macOS 26 menu bar app for AI usage limits. Claude Code is the session view: the 5-hour and weekly limits, when they reset, and which session is waiting on you. Codex, OpenRouter, Gemini CLI, OpenCode, z.ai, and DeepSeek add the meters their own docs or clients actually expose. Cursor and GitHub Copilot are unofficial: community endpoints, labeled Unofficial, and off when Settings → Unofficial providers is off.
 
 The panel follows the Floating Needs-you mockup: light on the left, dark on the right, example data.
 
@@ -15,41 +15,24 @@ Tidepool is not affiliated with Anthropic. The 5-hour block estimate follows the
 - macOS 26
 - Xcode with the macOS 26 SDK. CI prints `xcodebuild -version`, then builds with Swift Package Manager. There is no Xcode project and no Makefile.
 
-## Supported providers
+## What is real, and what is an estimate
 
-Claude Code is the only provider with a usage feed. Server figures are unlabeled. Estimates are marked `est.` or ≈.
-
-| What you see | Source | Label |
+| What you see | Source | Kind |
 |---|---|---|
-| 5-hour, weekly all-models, and weekly Opus or Sonnet percents, plus reset times | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token and `anthropic-beta: oauth-2025-04-20` | **Real.** Server figure. The endpoint is undocumented. It is the one Claude Code's `/usage` command uses. Buckets can be null. |
-| The same percents when that call fails | Status-line JSON `rate_limits.five_hour` and `rate_limits.seven_day` (`used_percentage`, `resets_at` as Unix seconds), written by the optional `cmb-hook statusline` wrapper | **Real.** Server figure relayed by Claude Code. Present for Pro and Max after the first API response. The panel says "From the status line". |
-| Today's tokens and dollars, and the block burn rate in Settings | `~/.claude/projects/**/*.jsonl`, `message.usage`, deduped by message id plus request id | **Estimated.** List price from the [Claude API pricing page](https://platform.claude.com/docs/en/about-claude/pricing) as checked on 2026-10-22. Cache writes without a 5-minute / 1-hour split use the 5-minute rate. Unknown models omit the dollar amount. The footer uses ≈. |
-| A 5-hour block with no server window | Floored hour of the first message, five hours long. A gap of more than five hours starts another block | **Estimated.** Anthropic's real window can differ. Rows are labeled `est.` |
-| Needs you / Working / Idle, and "Waiting on permission: run …" | Notification (`permission_prompt`, `idle_prompt`, `agent_needs_input`), PermissionRequest, Stop, SessionStart, SessionEnd, and UserPromptSubmit hooks | **Real.** From Claude Code. The hook prints nothing to stdout, so it does not approve or deny the prompt. |
-| The same states with `(est.)` | Last transcript role, only for sessions with no hook events | **Estimated.** An assistant message between 30 seconds and 10 minutes old is Needs you. |
+| 5-hour, weekly all-models, and weekly Opus or Sonnet percents, plus reset times | `GET https://api.anthropic.com/api/oauth/usage` with the Claude Code OAuth token and `anthropic-beta: oauth-2025-04-20` | Server figure. The endpoint is undocumented. It is the one Claude Code's `/usage` command uses. Buckets can be null. |
+| The same percents when that call fails | Status-line JSON `rate_limits.five_hour` and `rate_limits.seven_day` (`used_percentage`, `resets_at` as Unix seconds), written by the optional `cmb-hook statusline` wrapper | Server figure, relayed by Claude Code. Present for Pro and Max after the first API response. The panel says "From the status line". |
+| Today's tokens and dollars, and the block burn rate in Settings | `~/.claude/projects/**/*.jsonl`, `message.usage`, deduped by message id plus request id | **Estimate.** List price from the [Claude API pricing page](https://platform.claude.com/docs/en/about-claude/pricing) as checked on 2026-10-22. Cache writes without a 5-minute / 1-hour split use the 5-minute rate. Unknown models omit the dollar amount. The footer uses ≈. |
+| A 5-hour block with no server window | Floored hour of the first message, five hours long. A gap of more than five hours starts another block | **Estimate.** Anthropic's real window can differ. Rows are labeled `est.` |
+| Needs you / Working / Idle, and "Waiting on permission: run …" | Notification (`permission_prompt`, `idle_prompt`, `agent_needs_input`), PermissionRequest, Stop, SessionStart, SessionEnd, and UserPromptSubmit hooks | From Claude Code. PermissionRequest is included because the Notification `message` is generic and `permission_prompt` waits about six seconds. The hook prints nothing to stdout, so it does not approve or deny the prompt. |
+| The same states with `(est.)` | Last transcript role, only for sessions with no hook events | **Estimate.** |
 
-Extra usage is shown only when the payload includes `extra_usage.utilization`. `used_credits` is not displayed.
+Extra usage is shown only when the payload includes `extra_usage.utilization`. Community notes disagree on whether `used_credits` is dollars or cents, so Tidepool does not display that field.
 
-The menu bar item is the template symbol `gauge.with.dots.needle.50percent` plus the 5-hour percent. It is drawn in system orange only while a session needs you. Settings can hide the percent or add the reset countdown.
+The menu bar item is the template symbol `gauge.with.dots.needle.50percent` plus a percent: the 5-hour window when the selected provider has one, otherwise the first usage row. Cursor's menu percent is Included. GitHub Copilot's is Premium. It is drawn in system orange only while a session needs you. Settings can hide the percent or add the reset countdown. The countdown stays on the 5-hour window.
 
-Settings switches in this build are **Notifications when a session needs you**, **Launch at login**, and **Claude Code hooks**.
+## Install
 
-## Auto-detection and coming soon
-
-On launch, Tidepool looks for install markers it can name. A detected tool with no usage feed is **coming soon** in the panel and **Detected · coming soon** in Settings.
-
-| Tool | Counted as installed when |
-|---|---|
-| Claude Code | `claude` is on `PATH`, or `~/.claude` exists. This one is active, not coming soon. |
-| Cursor | `Cursor.app` is in `/Applications`, `~/Applications`, or `/System/Applications`, or `cursor` is on `PATH`, or `~/Library/Application Support/Cursor` exists |
-| Codex | `codex` is on `PATH`, or `~/.codex` exists, or `CODEX_HOME` names an existing directory |
-| Wispr Flow | `Wispr Flow.app` is in one of those application folders |
-
-Grok Bot's catalog entry has no signature. Settings shows **No documented on-disk marker yet**. Cursor being installed does not count as Grok Bot.
-
-See [ROADMAP.md](ROADMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Build from source
+Build from source:
 
 ```bash
 git clone https://github.com/Jynxed-hash/Tidepool.git
@@ -59,14 +42,13 @@ scripts/assemble-app.sh
 open dist/Tidepool.app
 ```
 
-`scripts/assemble-app.sh` runs `swift build -c release --product Tidepool --product cmb-hook` and wraps the binaries. They also remain at:
-
-- `.build/release/Tidepool`
-- `.build/release/cmb-hook`
-
-The app bundle is `dist/Tidepool.app`. `LSUIElement` is set, so it has no Dock icon. Look for the gauge in the menu bar. If the menu bar is full, check the menu bar overflow.
+`scripts/assemble-app.sh` runs `swift build -c release --product Tidepool --product cmb-hook` and wraps the binaries. They also remain at `.build/release/Tidepool` and `.build/release/cmb-hook`. The bundle is `dist/Tidepool.app`. `LSUIElement` is set, so it has no Dock icon. Look for the gauge in the menu bar, including the menu-bar overflow.
 
 `swift run Tidepool` also launches it, and that process shows a Dock icon because the SwiftPM run does not use the bundle's `Info.plist`.
+
+Then open Tidepool and turn on **Claude Code hooks** in Settings. That copies `cmb-hook` into `~/Library/Application Support/Tidepool/`, backs up `~/.claude/settings.json` under `~/.claude/tidepool-backups/`, and merges hook entries. Running it again does not duplicate them. Turning the switch off removes only Tidepool's entries and restores a status line Tidepool replaced.
+
+Tidepool reads the Claude Code token from the Keychain item `Claude Code-credentials` or from `~/.claude/.credentials.json`. It does not copy the token and it does not refresh it. If the token is expired, open Claude Code once and let it refresh.
 
 ### Signed DMG and Homebrew
 
@@ -86,9 +68,108 @@ brew install --cask jynxed-hash/tap/tidepool
 
 ## Privacy
 
-Tidepool reads credentials and does not write them back. The Claude Code token is read from the Keychain item `Claude Code-credentials` or from `~/.claude/.credentials.json`. It is held in memory and sent as `Authorization: Bearer` only to `https://api.anthropic.com/api/oauth/usage`. Tidepool does not refresh the token. If it is expired, open Claude Code once and let Claude Code refresh it.
+Tidepool does not run analytics. A credential is read into memory and sent only to that product's own usage host:
 
-The token is not written to `~/Library/Application Support/Tidepool`, the event log, or a status-line file. There is no analytics. Prompt text from `UserPromptSubmit` is discarded. Transcript parsing keeps usage, timestamps, cwd, git branch, role, and ids. A permission hook keeps the tool name and a short command or path, not the conversation.
+| Credential | Sent to |
+|---|---|
+| Claude Code OAuth token | `https://api.anthropic.com/api/oauth/usage` |
+| Codex, through the local `codex app-server` process | no extra host; Codex speaks for itself |
+| `OPENROUTER_API_KEY` | `https://openrouter.ai/api/v1/key` |
+| Gemini CLI `access_token` from `~/.gemini/oauth_creds.json`, and only while `expiry_date` is still in the future | `https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist` and `:retrieveUserQuota` |
+| `OPENCODE_API_KEY` | `https://opencode.ai/zen/go/v1/usage` |
+| `ZAI_API_KEY` | `https://api.z.ai/api/monitor/usage/quota/limit` |
+| `ZHIPUAI_API_KEY`, only when `ZAI_API_KEY` is unset | `https://open.bigmodel.cn/api/monitor/usage/quota/limit` |
+| `DEEPSEEK_API_KEY` | `https://api.deepseek.com/user/balance` |
+| Cursor `cursorAuth/accessToken` from `state.vscdb`, read-only. The refresh token is not read. | `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage` |
+| GitHub `oauth_token` from `~/.config/github-copilot/apps.json` or `hosts.json`, or the `github.com` block of `~/.config/gh/hosts.yml` (or `GH_CONFIG_DIR`). The keychain is not read. | `GET https://api.github.com/copilot_internal/user` |
+
+Tokens and keys are not written to Tidepool's support folder. Tidepool does not refresh OAuth tokens. Prompt text from `UserPromptSubmit` is discarded. Transcript parsing keeps usage, timestamps, cwd, git branch, role, and ids. A permission hook keeps the tool name and a short command or path, not the conversation.
+
+## Other tools
+
+The header menu lists providers that are installed and have a feed. Claude Code is always listed. A selected unofficial provider shows a monochrome **Unofficial** badge.
+
+**Unofficial providers** in Settings is on by default. It covers Cursor and GitHub Copilot. Turning it off skips the token read and the network call, drops those two from the header menu, and labels them **Off** in the Tools list when they are detected. Turning it back on fetches again. The other meters are not behind that switch.
+
+Wispr Flow, Devin Desktop, Kiro, Amp, Aider, Factory, and the ChatGPT app still show as **coming soon** when detected. See [ROADMAP.md](ROADMAP.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Codex
+
+| What you see | Source | Kind |
+|---|---|---|
+| 5-hour, weekly, or other windows, named from `windowDurationMins` (300 minutes is the 5-hour row, 10080 is weekly) | `codex app-server` JSON-RPC `account/rateLimits/read` after `initialize` / `initialized` | Server figure. ChatGPT auth inside Codex. Tidepool does not call `account/read`, log in, or redeem a reset. |
+| The same windows when app-server does not answer | Newest `token_count` event in `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (`used_percent`, `window_minutes`, `resets_at`) | Server figure Codex already wrote down. The panel says it came from the session file. |
+| Today's tokens | `account/usage/read` `dailyUsageBuckets` for the local calendar day | Server figure. No dollar amount. |
+| Needs you | `thread/list` status `active` with `activeFlags` containing `waitingOnApproval` | From Codex, while app-server is reachable. The waiting line does not include the command. Thread previews are not shown. |
+| Working / Idle with `(est.)` | Last persisted `task_started` / `turn_started` or `task_complete` / `turn_complete` / `turn_aborted` in a rollout from the last 12 hours | **Estimate.** Approval requests are not stored in the rollout, so a session file alone never becomes Needs you. |
+
+`/status` is an interactive TUI command. It has no machine-readable contract, so Tidepool does not scrape it.
+
+### Grok Bot
+
+Detection is the app the install guide tells you to drag to Applications: `Grok Bot.app`. Cursor being installed does not count. The weekly pool is shown in Grok Bot under Settings → Usage & Billing and at grok.com/dashboard. No supported local file or API exposes that percentage, or which conversation is waiting on approval. The panel says so and does not draw a bar. Settings labels the tool **Limited data**.
+
+### OpenRouter
+
+| What you see | Source | Kind |
+|---|---|---|
+| Key limit percent, from `limit` and `limit_remaining` (or `usage` when remaining is absent) | `GET https://openrouter.ai/api/v1/key` | Server dollars. The percent is that division. A null `limit` draws no bar. |
+| Budget percent, from `effective_budget.spend_usd` / `limit_usd`, with `resets_at` | Same response | Server dollars. |
+| Free models today, from `free_model_daily_requests.used` / `limit` | Same response | Server counts. |
+| Today, dollars only | `usage_daily` | Server dollars for the current UTC day. Not a token count. |
+
+The key is `OPENROUTER_API_KEY` ([install](https://openrouter.ai/docs/install)). Tidepool does not copy it.
+
+### Gemini CLI
+
+| What you see | Source | Kind |
+|---|---|---|
+| One row per model, used percent `100 * (1 - remainingFraction)` | `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota` after `loadCodeAssist` returns `cloudaicompanionProject` | Server fraction, from the [Gemini CLI client](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/code_assist/types.ts). Several buckets for one model keep the lowest remaining fraction. |
+| Nothing, with a notice | `~/.gemini/oauth_creds.json` `expiry_date` already passed, or no `access_token` | Tidepool does not refresh the token and does not read `refresh_token`. |
+
+### OpenCode
+
+| What you see | Source | Kind |
+|---|---|---|
+| Rolling, weekly, and monthly percents, plus `resetsAt` | `GET https://opencode.ai/zen/go/v1/usage` | Server percent. The rolling row stays "Rolling" because the payload has no duration. |
+
+The key is `OPENCODE_API_KEY` ([Pi harness](https://opencode.ai/v2/docs/console/harnesses/pi/)). `auth.json` is not parsed.
+
+### z.ai
+
+| What you see | Source | Kind |
+|---|---|---|
+| 5-hour, weekly, and monthly tool-call percents, plus `nextResetTime` | `GET /api/monitor/usage/quota/limit` on `api.z.ai` or `open.bigmodel.cn` | `percentage` is the server figure used by OpenUsage and CodexBar. Rows with another `unit` are skipped. This path is not in Z.AI's public API reference. |
+
+`ZAI_API_KEY` is the name in the [Z.AI OpenAI guide](https://docs.z.ai/guides/develop/openai/python) and is sent only to `api.z.ai`. `ZHIPUAI_API_KEY` is sent only to `open.bigmodel.cn`, and only when the global key is unset.
+
+### DeepSeek
+
+| What you see | Source | Kind |
+|---|---|---|
+| Balance text, and whether it is enough for API calls | `GET https://api.deepseek.com/user/balance` | Server strings: `is_available`, `total_balance`, `granted_balance`, `topped_up_balance`, `currency`. No percent, because the API publishes no cap. |
+
+### Cursor (Unofficial)
+
+| What you see | Source | Kind |
+|---|---|---|
+| Included percent | `includedSpend / limit` on `POST https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`. Both fields are cents. | Server cents, divided. This is the figure Cursor's included-usage sentence is described as using. |
+| Total and Auto percents | `planUsage.totalPercentUsed` and `autoPercentUsed` on the same response | Server percents. They are not the same denominator as Included. |
+| On-demand and Team pool, only when that limit is greater than zero | `spendLimitUsage.individualUsed / individualLimit` and `pooledUsed / pooledLimit` | Server cents, divided. |
+| Reset | `billingCycleEnd`, unix milliseconds | Server timestamp. No countdown; it is a billing period. |
+
+`apiPercentUsed` is not shown. It can disagree with Included on the same payload. Nothing here is an estimate. The access token is a read-only sqlite query of `cursorAuth/accessToken` in `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`. Tidepool does not read `cursorAuth/refreshToken`, does not write the database, and does not call the token endpoint. A body with none of Included, Total, or Auto becomes **Limited data**. Settings → Unofficial providers turns the call off.
+
+### GitHub Copilot (Unofficial)
+
+| What you see | Source | Kind |
+|---|---|---|
+| Premium, Chat, and Completions used percents | `GET https://api.github.com/copilot_internal/user` `quota_snapshots.*.percent_remaining` | Server remaining percent. The bar is `100 - percent_remaining`. |
+| The same rows when `percent_remaining` is absent | `entitlement` and `remaining` on that snapshot, when `entitlement` is greater than zero | Server counts, divided. |
+| Chat and Completions on the free tier | `limited_user_quotas` as the remaining count and `monthly_quotas` as the cap, and only when both exist for that key | Server counts, divided. |
+| Reset | `quota_reset_date_utc`, `quota_reset_date`, a non-zero `quota_reset_at`, or `limited_user_reset_date` | Server timestamp. |
+
+`unlimited: true` and `entitlement: -1` draw no bar. A response with no `quota_snapshots`, `limited_user_quotas`, or `monthly_quotas` becomes **Limited data**. The token comes from the Copilot editor config or the `github.com` block of gh's `hosts.yml`. Tidepool does not read the keychain, does not run `gh auth token`, and does not refresh the token. Org billing is not called. Settings → Unofficial providers turns the call off.
 
 ## Testing
 
@@ -98,59 +179,48 @@ Unit tests, from the repo root:
 swift test
 ```
 
-They cover usage JSON, status-line JSON, transcript dedupe, block boundaries, list prices, hook ingestion, the settings installer, and install detection. They do not call Anthropic. GitHub Actions on `macos-26` runs `swift test` and `swift build -c release --product Tidepool --product cmb-hook`.
+They cover usage JSON, status-line JSON, transcript dedupe, block boundaries, list prices, hook ingestion, the settings installer, install detection, Codex and Grok fixtures, the five API meters, and the unofficial Cursor and Copilot fixtures. They do not call Anthropic, Cursor, or GitHub.
 
-### Launch
+### Launch and Claude Code hooks
 
 ```bash
 scripts/assemble-app.sh
 open dist/Tidepool.app
 ```
 
-Click the gauge. The gear opens Settings.
-
-### Install the Claude Code hooks
-
-In Settings, turn on **Claude Code hooks**. That copies `cmb-hook` to `~/Library/Application Support/Tidepool/cmb-hook`, writes a byte-for-byte backup of `~/.claude/settings.json` under `~/.claude/tidepool-backups/`, and merges hook entries. Running it again does not duplicate them. Turning the switch off removes only Tidepool's entries and restores a status line Tidepool replaced.
-
-Confirm the install:
+Click the gauge, then the gear. Turn on **Claude Code hooks**. That copies `cmb-hook` to `~/Library/Application Support/Tidepool/cmb-hook`, backs up `~/.claude/settings.json` under `~/.claude/tidepool-backups/`, and merges hook entries. Confirm with:
 
 ```bash
 grep -n cmb-hook ~/.claude/settings.json
-ls -l ~/Library/Application\ Support/Tidepool/cmb-hook
 ```
 
-The command in `settings.json` contains `/Tidepool/cmb-hook`. Notification hooks use the matcher `permission_prompt|idle_prompt|agent_needs_input`. PermissionRequest, Stop, SessionStart, SessionEnd, and UserPromptSubmit are installed too.
-
-### Trigger Needs you
-
-1. Leave **Claude Code hooks** on, and leave notifications on if you want the macOS banner.
-2. Start Claude Code in a repository.
-3. Ask it to run a shell command that is not auto-allowed, and leave the permission prompt unanswered.
-
-Within a few seconds the menu bar gauge turns orange and the panel shows that repo as **Needs you**, with the waiting line from the hook (a short command or path, not the prompt). `PermissionRequest` and a `permission_prompt` notification are the events that set that state. `idle_prompt` and `agent_needs_input` do the same.
-
-Without hooks, the same row can appear from the transcript heuristic and is labeled **Needs you (est.)**.
-
-### Logs
-
-Tidepool does not write an `os_log`. The debug trail is the support folder:
+To see **Needs you**, leave the hooks on, start Claude Code in a repo, ask it to run a shell command that is not auto-allowed, and leave the permission prompt unanswered. The gauge turns orange. The event log is:
 
 ```bash
 tail -f ~/Library/Application\ Support/Tidepool/events.ndjson
 ```
 
-A Needs you event is a JSON line whose `hook` is `PermissionRequest`, or `Notification` with `notificationType` `permission_prompt`, `idle_prompt`, or `agent_needs_input`. `cmb-hook` writes that file and prints nothing to stdout, so an empty hook stdout is expected.
+Tidepool does not write an `os_log`. `cmb-hook` prints nothing to stdout. `statusline.json` in that folder is the last status-line snapshot. `TIDEPOOL_SUPPORT_DIR` overrides the support folder. To watch the process, quit the bundle and run `dist/Tidepool.app/Contents/MacOS/Tidepool`.
 
-`~/Library/Application Support/Tidepool/statusline.json` is the last status-line snapshot, when the status-line wrapper is installed. Override the support folder with `TIDEPOOL_SUPPORT_DIR` if you want a scratch directory.
+### Codex
 
-To watch the app process itself, quit the bundle and run the executable in Terminal:
+Sign in to Codex with ChatGPT so `codex` is on `PATH` (or `~/.codex` exists). Open the gauge and choose **Codex** in the header. Tidepool runs `codex app-server --listen stdio://` and reads `account/rateLimits/read`, `account/usage/read`, and `thread/list`. A 5-hour or weekly bar is a server figure. If app-server does not answer, the same windows come from the newest `token_count` event under `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, and the panel says they came from the session file. **Needs you** appears only while app-server reports a thread whose status is `active` and whose `activeFlags` contain `waitingOnApproval`. A rollout file alone never becomes Needs you.
 
-```bash
-dist/Tidepool.app/Contents/MacOS/Tidepool
-```
+### Cursor (Unofficial)
 
-Codex usage is not in this build. A detected Codex install shows as coming soon and has no usage numbers to check.
+Be signed in to the Cursor app so `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` contains `cursorAuth/accessToken`. Choose **Cursor** in the header. The **Unofficial** badge sits beside the title. Included, Total, and Auto are server figures from `GetCurrentPeriodUsage`. The menu bar percent is Included. Tidepool reads that one key with `sqlite3 -readonly` and does not refresh the session. A changed response shows **Limited data** and no bars.
+
+### GitHub Copilot (Unofficial)
+
+Put a GitHub `oauth_token` in `~/.config/github-copilot/apps.json` (or the older `hosts.json`), or in the `github.com` block of `~/.config/gh/hosts.yml`. Choose **GitHub Copilot**. The badge says **Unofficial**. Premium, Chat, and Completions are server figures from `GET https://api.github.com/copilot_internal/user`. The menu bar percent is Premium. Unlimited buckets draw no bar. Tidepool does not read the macOS keychain and does not run `gh auth token`.
+
+### Unofficial providers switch
+
+The switch is on unless you turn it off. Turn it off: Cursor and GitHub Copilot leave the header menu, their calls stop, and Settings lists a detected install as **Off**. Turn it on: they return on the next refresh, and the selected one shows the badge again. Claude Code, Codex, and the API-key meters stay available either way.
+
+## Develop
+
+GitHub Actions runs `swift test` and `swift build -c release --product Tidepool --product cmb-hook` on `macos-26`. A Linux checkout can run `swift test` (the SwiftUI app is not part of the package there). It cannot compile the menu bar app.
 
 ## License
 
