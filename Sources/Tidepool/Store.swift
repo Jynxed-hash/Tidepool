@@ -19,7 +19,7 @@ enum MenuBarFormat: String, CaseIterable, Identifiable {
         switch self {
         case .symbolPercent: "Symbol and percent"
         case .symbol: "Symbol only"
-        case .symbolPercentReset: "Symbol, percent, and reset"
+        case .symbolPercentReset: "Symbol, percent, reset in panel"
         }
     }
 }
@@ -111,10 +111,15 @@ final class TidepoolStore {
         return "\(Int(window.usedPercent.rounded()))%"
     }
 
-    var menuReset: String? {
+    /// 5-hour used percent, when that window exists. Other rows keep the static mark.
+    var menuBarUsedPercent: Double? {
+        snapshot.fiveHour?.usedPercent
+    }
+
+    /// The countdown that used to sit in the menu bar. The usage row still has its own reset line.
+    var panelReset: String? {
         guard menuFormat == .symbolPercentReset, let resets = snapshot.fiveHour?.resetsAt else { return nil }
         return ResetCopy.countdown(resets, now: Date())
-            .replacingOccurrences(of: "Resets in ", with: "")
     }
 
     func runLoop() async {

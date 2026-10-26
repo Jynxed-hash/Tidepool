@@ -28,7 +28,7 @@ Tidepool is not affiliated with Anthropic. The 5-hour block estimate follows the
 
 Extra usage is shown only when the payload includes `extra_usage.utilization`. Community notes disagree on whether `used_credits` is dollars or cents, so Tidepool does not display that field.
 
-The menu bar item is the template symbol `gauge.with.dots.needle.50percent` plus a percent: the 5-hour window when the selected provider has one, otherwise the first usage row. Cursor's menu percent is Included. GitHub Copilot's is Premium. It is drawn in system orange only while a session needs you. Settings can hide the percent or add the reset countdown. The countdown stays on the 5-hour window.
+The menu bar item is an 18×18 template mark: three left-aligned rounded bars. With no 5-hour figure they stay at the static lengths (10.5, 8, and 5 points). A 5-hour used percent shortens them by the remaining allowance. Needs you lengthens the top bar to the full 14-point track. The mark stays monochrome. Settings can hide the percent. The percent is 12pt monospaced digits, 3 points to the right of the mark. The reset countdown is not drawn in the menu bar. Settings → Symbol, percent, reset in panel shows that countdown under the panel title. Cursor's menu percent is Included. GitHub Copilot's is Premium.
 
 ## Install
 
@@ -42,7 +42,7 @@ scripts/assemble-app.sh
 open dist/Tidepool.app
 ```
 
-`scripts/assemble-app.sh` builds `Tidepool` and `cmb-hook` separately and wraps the binaries. The bundle is `dist/Tidepool.app`. `LSUIElement` is set, so it has no Dock icon. Look for the gauge in the menu bar, including the menu-bar overflow. See [Building locally and CI](#building-locally-and-ci).
+`scripts/assemble-app.sh` builds `Tidepool` and `cmb-hook` separately and wraps the binaries. The bundle is `dist/Tidepool.app`, with `AppIcon.icns` (black rounded square, white Allowance bars). `LSUIElement` is set, so it has no Dock icon. Look for the three bars in the menu bar, including the menu-bar overflow. See [Building locally and CI](#building-locally-and-ci).
 
 `swift run Tidepool` also launches it, and that process shows a Dock icon because the SwiftPM run does not use the bundle's `Info.plist`.
 
@@ -188,13 +188,13 @@ scripts/assemble-app.sh
 open dist/Tidepool.app
 ```
 
-Click the gauge, then the gear. Turn on **Claude Code hooks**. That copies `cmb-hook` to `~/Library/Application Support/Tidepool/cmb-hook`, backs up `~/.claude/settings.json` under `~/.claude/tidepool-backups/`, and merges hook entries. Confirm with:
+Click the menu mark, then the gear. Turn on **Claude Code hooks**. That copies `cmb-hook` to `~/Library/Application Support/Tidepool/cmb-hook`, backs up `~/.claude/settings.json` under `~/.claude/tidepool-backups/`, and merges hook entries. Confirm with:
 
 ```bash
 grep -n cmb-hook ~/.claude/settings.json
 ```
 
-To see **Needs you**, leave the hooks on, start Claude Code in a repo, ask it to run a shell command that is not auto-allowed, and leave the permission prompt unanswered. The gauge turns orange. The event log is:
+To see **Needs you**, leave the hooks on, start Claude Code in a repo, ask it to run a shell command that is not auto-allowed, and leave the permission prompt unanswered. The top bar of the menu mark runs the full width. The event log is:
 
 ```bash
 tail -f ~/Library/Application\ Support/Tidepool/events.ndjson
@@ -204,7 +204,7 @@ Tidepool does not write an `os_log`. `cmb-hook` prints nothing to stdout. `statu
 
 ### Codex
 
-Sign in to Codex with ChatGPT so `codex` is on `PATH` (or `~/.codex` exists). Open the gauge and choose **Codex** in the header. Tidepool runs `codex app-server --listen stdio://` and reads `account/rateLimits/read`, `account/usage/read`, and `thread/list`. A 5-hour or weekly bar is a server figure. If app-server does not answer, the same windows come from the newest `token_count` event under `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, and the panel says they came from the session file. **Needs you** appears only while app-server reports a thread whose status is `active` and whose `activeFlags` contain `waitingOnApproval`. A rollout file alone never becomes Needs you.
+Sign in to Codex with ChatGPT so `codex` is on `PATH` (or `~/.codex` exists). Open the menu mark and choose **Codex** in the header. Tidepool runs `codex app-server --listen stdio://` and reads `account/rateLimits/read`, `account/usage/read`, and `thread/list`. A 5-hour or weekly bar is a server figure. If app-server does not answer, the same windows come from the newest `token_count` event under `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`, and the panel says they came from the session file. **Needs you** appears only while app-server reports a thread whose status is `active` and whose `activeFlags` contain `waitingOnApproval`. A rollout file alone never becomes Needs you.
 
 ### Cursor (Unofficial)
 
