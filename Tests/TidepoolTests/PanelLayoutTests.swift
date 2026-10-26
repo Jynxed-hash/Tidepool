@@ -7,7 +7,8 @@ import Testing
 
 @MainActor
 private enum PanelFixtures {
-    static let now = Date(timeIntervalSince1970: 1_761_488_400)
+    /// Captured when the fixtures are built so the 5-hour countdown is a couple of hours, not a year-old "Reset due".
+    static let now = Date()
 
     static let catalog: [CatalogStatus] = [
         CatalogStatus(id: ToolCatalog.claudeCode, displayName: "Claude Code", state: .active, evidence: [".claude"]),
@@ -27,7 +28,8 @@ private enum PanelFixtures {
     static func store(
         selected: String,
         snapshots: [String: ProviderSnapshot],
-        showingSettings: Bool = false
+        showingSettings: Bool = false,
+        menuFormat: MenuBarFormat = .symbolPercent
     ) -> TidepoolStore {
         let name = "tidepool-panel-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: name)!
@@ -37,12 +39,20 @@ private enum PanelFixtures {
         store.selectedProviderID = selected
         store.replaceSnapshots(snapshots)
         store.showingSettings = showingSettings
+        store.menuFormat = menuFormat
         return store
     }
 
     static var cases: [(name: String, store: TidepoolStore)] {
         [
-            ("claude-ready", store(selected: ToolCatalog.claudeCode, snapshots: [ToolCatalog.claudeCode: claudeReady])),
+            (
+                "claude-ready",
+                store(
+                    selected: ToolCatalog.claudeCode,
+                    snapshots: [ToolCatalog.claudeCode: claudeReady],
+                    menuFormat: .symbolPercentReset
+                )
+            ),
             ("claude-sign-in", store(selected: ToolCatalog.claudeCode, snapshots: [ToolCatalog.claudeCode: claudeSignIn])),
             ("gemini-ready", store(selected: ToolCatalog.geminiCLI, snapshots: [ToolCatalog.geminiCLI: geminiReady])),
             ("gemini-sign-in", store(selected: ToolCatalog.geminiCLI, snapshots: [ToolCatalog.geminiCLI: geminiSignIn])),
