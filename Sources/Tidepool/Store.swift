@@ -24,6 +24,14 @@ enum MenuBarFormat: String, CaseIterable, Identifiable {
     }
 }
 
+enum RefreshInterval {
+    static let choices: [Double] = [30, 60, 90, 300]
+
+    static func snap(_ seconds: Double) -> Double {
+        choices.min(by: { abs($0 - seconds) < abs($1 - seconds) }) ?? 90
+    }
+}
+
 enum PreferenceKey {
     static let format = "tidepool.menuFormat"
     static let notifications = "tidepool.notifications"
@@ -53,23 +61,29 @@ final class TidepoolStore {
     private var watch: DirectoryWatch?
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    /// `startsRefresh` is false for layout fixtures, which must not poll, watch the disk, or touch notifications.
+    init(defaults: UserDefaults = .standard, startsRefresh: Bool = true) {
         self.defaults = defaults
         let format = MenuBarFormat(rawValue: defaults.string(forKey: PreferenceKey.format) ?? "") ?? .symbolPercent
         self.menuFormat = format
         self.notificationsEnabled = defaults.object(forKey: PreferenceKey.notifications) as? Bool ?? true
         self.hooksEnabled = defaults.bool(forKey: PreferenceKey.hooks)
         let stored = defaults.double(forKey: PreferenceKey.refresh)
-        self.refreshSeconds = stored >= 60 ? stored : 90
+        self.refreshSeconds = stored > 0 ? RefreshInterval.snap(stored) : 90
         self.unofficialProvidersEnabled = defaults.object(forKey: PreferenceKey.unofficial) as? Bool ?? true
-        self.launchAtLogin = LoginItem.enabled
+        self.launchAtLogin = startsRefresh ? LoginItem.enabled : false
         let storedProvider = defaults.string(forKey: PreferenceKey.provider) ?? ToolCatalog.claudeCode
         self.selectedProviderID = storedProvider
+        guard startsRefresh else { return }
         UNUserNotificationCenter.current().delegate = NotificationHub.presenter
         loop = Task { [weak self] in
             await self?.runLoop()
         }
         startWatch()
+    }
+
+    func replaceSnapshots(_ next: [String: ProviderSnapshot]) {
+        snapshots = next
     }
 
     var home: URL { FileManager.default.homeDirectoryForCurrentUser }
@@ -88,8 +102,12 @@ final class TidepoolStore {
         catalog.filter { status in
             if status.id == ToolCatalog.claudeCode { return true }
             if status.unofficial && !unofficialProvidersEnabled { return false }
-            return status.state == .active || status.state == .limitedData
+            return status.state == .active || status.state == .limitedData || status.state == .comingSoon
         }
+    }
+
+    var selectedIsComingSoon: Bool {
+        catalog.first { $0.id == selectedProviderID }?.state == .comingSoon
     }
 
     var selectedIsUnofficial: Bool {
@@ -228,7 +246,7 @@ final class TidepoolStore {
     }
 
     func setRefreshSeconds(_ seconds: Double) {
-        refreshSeconds = min(600, max(60, seconds))
+        refreshSeconds = RefreshInterval.snap(seconds)
         defaults.set(refreshSeconds, forKey: PreferenceKey.refresh)
     }
 

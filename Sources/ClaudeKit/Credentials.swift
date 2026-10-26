@@ -6,6 +6,14 @@ public enum CredentialError: Error, Equatable {
     case notFound
     case malformed
     case expired
+    /// The keychain or `security` refused the read. Distinct from a missing login.
+    case readFailed
+}
+
+enum SecretFetch: Sendable {
+    case value(Data)
+    case missing
+    case denied
 }
 
 public enum CredentialFile {
@@ -155,6 +163,11 @@ struct KeychainItem: Sendable, Equatable {
     let data: Data
 }
 
+struct KeychainBatch: Sendable {
+    var items: [KeychainItem]
+    var denied: Bool
+}
+
 final class CredentialCache: @unchecked Sendable {
     static let shared = CredentialCache()
 
@@ -182,8 +195,8 @@ public protocol CredentialReading: Sendable {
 }
 
 public struct ClaudeCredentialReader: CredentialReading {
-    let security: @Sendable (String, String?) -> Data?
-    let keychainItems: @Sendable (String) -> [KeychainItem]
+    let security: @Sendable (String, String?) -> SecretFetch
+    let keychainItems: @Sendable (String) -> KeychainBatch
     let file: @Sendable (URL) -> Data?
     let environment: [String: String]
     let user: String
@@ -191,11 +204,11 @@ public struct ClaudeCredentialReader: CredentialReading {
 
     public init() {
         #if os(macOS)
-        let security: @Sendable (String, String?) -> Data? = SecurityPassword.read
-        let keychainItems: @Sendable (String) -> [KeychainItem] = KeychainCredentials.copyItems
+        let security: @Sendable (String, String?) -> SecretFetch = SecurityPassword.lookup
+        let keychainItems: @Sendable (String) -> KeychainBatch = KeychainCredentials.lookup
         #else
-        let security: @Sendable (String, String?) -> Data? = { _, _ in nil }
-        let keychainItems: @Sendable (String) -> [KeychainItem] = { _ in [] }
+        let security: @Sendable (String, String?) -> SecretFetch = { _, _ in .missing }
+        let keychainItems: @Sendable (String) -> KeychainBatch = { _ in KeychainBatch(items: [], denied: false) }
         #endif
         self.init(
             security: security,
@@ -208,8 +221,8 @@ public struct ClaudeCredentialReader: CredentialReading {
     }
 
     init(
-        security: @escaping @Sendable (String, String?) -> Data?,
-        keychainItems: @escaping @Sendable (String) -> [KeychainItem],
+        security: @escaping @Sendable (String, String?) -> SecretFetch,
+        keychainItems: @escaping @Sendable (String) -> KeychainBatch,
         file: @escaping @Sendable (URL) -> Data?,
         environment: [String: String],
         user: String,
@@ -242,6 +255,7 @@ public struct ClaudeCredentialReader: CredentialReading {
         )
         var sawExpired = false
         var sawMalformed = false
+        var readDenied = false
 
         func consider(_ data: Data) -> ParsedLogin? {
             switch CredentialFile.classify(data, now: now) {
@@ -258,13 +272,21 @@ public struct ClaudeCredentialReader: CredentialReading {
             }
         }
 
-        if let data = security(service, account), let login = consider(data) {
-            return login
+        switch security(service, account) {
+        case .value(let data):
+            if let login = consider(data) {
+                return login
+            }
+        case .denied:
+            readDenied = true
+        case .missing:
+            break
         }
 
-        let items = keychainItems(service)
-        let preferred = items.filter { $0.account == account }
-        let others = items.filter { $0.account != account }
+        let batch = keychainItems(service)
+        if batch.denied { readDenied = true }
+        let preferred = batch.items.filter { $0.account == account }
+        let others = batch.items.filter { $0.account != account }
         for item in preferred + others {
             if let login = consider(item.data) {
                 return login
@@ -279,6 +301,7 @@ public struct ClaudeCredentialReader: CredentialReading {
 
         if sawExpired { throw CredentialError.expired }
         if sawMalformed { throw CredentialError.malformed }
+        if readDenied { throw CredentialError.readFailed }
         throw CredentialError.notFound
     }
 }
@@ -291,7 +314,7 @@ enum SecurityPassword {
     /// menu-bar process often returns interaction-not-allowed, because the
     /// item's ACL is the `security` tool, and an LSUIElement app may not show
     /// the keychain panel. `/usr/bin/security` can.
-    static func read(service: String, account: String?) -> Data? {
+    static func lookup(service: String, account: String?) -> SecretFetch {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         var arguments = ["find-generic-password", "-s", service]
@@ -307,12 +330,22 @@ enum SecurityPassword {
             try process.run()
         } catch {
             output.cancel()
-            return nil
+            return .denied
         }
         // Drop the parent's write end so the reader sees EOF when `security` exits.
         try? output.pipe.fileHandleForWriting.close()
         output.begin()
-        return output.result(process: process, timeout: 45)
+        let status = output.wait(process: process, timeout: 45)
+        let data = output.snapshot()
+        if status == 0 {
+            return data.isEmpty ? .missing : .value(data)
+        }
+        // `security` uses 44 when the item is not in the keychain. Any other
+        // failure (cancel, interaction not allowed, timeout) is a denied read.
+        if status == 44 {
+            return .missing
+        }
+        return .denied
     }
 }
 
@@ -353,7 +386,7 @@ final class SecurityOutput: @unchecked Sendable {
         _ = finished.wait(timeout: .now() + 2)
     }
 
-    func result(process: Process, timeout: TimeInterval) -> Data? {
+    func wait(process: Process, timeout: TimeInterval) -> Int32 {
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning && Date() < deadline {
             Thread.sleep(forTimeInterval: 0.05)
@@ -363,10 +396,14 @@ final class SecurityOutput: @unchecked Sendable {
             try? pipe.fileHandleForReading.close()
         }
         _ = finished.wait(timeout: .now() + 2)
-        guard !process.isRunning, process.terminationStatus == 0 else { return nil }
+        guard !process.isRunning else { return -1 }
+        return process.terminationStatus
+    }
+
+    func snapshot() -> Data {
         lock.lock()
         defer { lock.unlock() }
-        return data.isEmpty ? nil : data
+        return data
     }
 }
 
@@ -375,7 +412,7 @@ enum KeychainCredentials {
     /// several items share the service `Claude Code-credentials` and the first
     /// one is often MCP state (`account` `unknown`, payload `mcpOAuth` only).
     /// The authentication UI is disabled so a menu-bar refresh cannot hang here.
-    static func copyItems(service: String) -> [KeychainItem] {
+    static func lookup(service: String) -> KeychainBatch {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -386,15 +423,20 @@ enum KeychainCredentials {
         ]
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let entries = result as? [Any] else { return [] }
-        var items: [KeychainItem] = []
-        for entry in entries {
-            guard let dict = entry as? [String: Any] else { continue }
-            guard let data = dict[kSecValueData as String] as? Data else { continue }
-            let account = dict[kSecAttrAccount as String] as? String ?? ""
-            items.append(KeychainItem(account: account, data: data))
+        if status == errSecSuccess, let entries = result as? [Any] {
+            var items: [KeychainItem] = []
+            for entry in entries {
+                guard let dict = entry as? [String: Any] else { continue }
+                guard let data = dict[kSecValueData as String] as? Data else { continue }
+                let account = dict[kSecAttrAccount as String] as? String ?? ""
+                items.append(KeychainItem(account: account, data: data))
+            }
+            return KeychainBatch(items: items, denied: false)
         }
-        return items
+        let denied = status == errSecInteractionNotAllowed
+            || status == errSecAuthFailed
+            || status == errSecUserCanceled
+        return KeychainBatch(items: [], denied: denied)
     }
 }
 #endif

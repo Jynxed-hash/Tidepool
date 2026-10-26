@@ -377,10 +377,10 @@ struct StaticCredentials: CredentialReading {
     let reader = ClaudeCredentialReader(
         security: { service, account in
             calls.security.append(SecurityCall(service: service, account: account))
-            return mcp
+            return .value(mcp)
         },
         keychainItems: { _ in
-            [KeychainItem(account: "unknown", data: mcp)]
+            KeychainBatch(items: [KeychainItem(account: "unknown", data: mcp)], denied: false)
         },
         file: { url in
             calls.fileReads += 1
@@ -406,13 +406,16 @@ struct StaticCredentials: CredentialReading {
     """.data(using: .utf8)!
     let calls = CallLog()
     let reader = ClaudeCredentialReader(
-        security: { _, _ in nil },
+        security: { _, _ in .missing },
         keychainItems: { service in
             calls.services.append(service)
-            return [
-                KeychainItem(account: "unknown", data: mcp),
-                KeychainItem(account: "jane", data: login),
-            ]
+            return KeychainBatch(
+                items: [
+                    KeychainItem(account: "unknown", data: mcp),
+                    KeychainItem(account: "jane", data: login),
+                ],
+                denied: false
+            )
         },
         file: { _ in
             calls.fileReads += 1
@@ -431,8 +434,8 @@ struct StaticCredentials: CredentialReading {
 @Test func credentialReaderReportsExpiredInsteadOfMissing() {
     let expired = #"{"claudeAiOauth":{"accessToken":"sk-ant-oat01-example","expiresAt":100}}"#.data(using: .utf8)!
     let reader = ClaudeCredentialReader(
-        security: { _, _ in expired },
-        keychainItems: { _ in [] },
+        security: { _, _ in .value(expired) },
+        keychainItems: { _ in KeychainBatch(items: [], denied: false) },
         file: { _ in nil },
         environment: [:],
         user: "jane",
@@ -441,6 +444,42 @@ struct StaticCredentials: CredentialReading {
     #expect(throws: CredentialError.expired) {
         try reader.accessToken(home: URL(fileURLWithPath: "/Users/jane"), now: Date())
     }
+}
+
+@Test func credentialReaderReportsADeniedRead() {
+    let reader = ClaudeCredentialReader(
+        security: { _, _ in .denied },
+        keychainItems: { _ in KeychainBatch(items: [], denied: false) },
+        file: { _ in nil },
+        environment: [:],
+        user: "jane",
+        cache: CredentialCache()
+    )
+    #expect(throws: CredentialError.readFailed) {
+        try reader.accessToken(home: URL(fileURLWithPath: "/Users/jane"), now: Date())
+    }
+}
+
+@Test func claudeSignInCopyHidesTheKeychainHintUntilAReadFails() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let http = MockHTTP { _ in HTTPResponse(status: 500, headers: [:], body: Data()) }
+    let now = Date(timeIntervalSince1970: 1_761_150_000)
+    let request = ProviderRefreshRequest(now: now, home: root, supportDirectory: root, allowNetwork: true)
+    let missing = ClaudeCodeProvider(
+        http: http,
+        credentials: StaticCredentials(error: .notFound),
+        git: GitInspector { _, _ in nil }
+    )
+    let signedOut = await missing.refresh(request)
+    #expect(signedOut.notice == "Sign in with Claude Code, then reopen Tidepool.")
+    let denied = ClaudeCodeProvider(
+        http: http,
+        credentials: StaticCredentials(error: .readFailed),
+        git: GitInspector { _, _ in nil }
+    )
+    let failed = await denied.refresh(request)
+    #expect(failed.notice == "Allow the keychain prompt for Claude Code-credentials.")
 }
 
 @Test func credentialReaderCachesALiveTokenUntilItExpires() throws {
@@ -453,9 +492,9 @@ struct StaticCredentials: CredentialReading {
     let reader = ClaudeCredentialReader(
         security: { _, _ in
             calls.fileReads += 1
-            return login
+            return .value(login)
         },
-        keychainItems: { _ in [] },
+        keychainItems: { _ in KeychainBatch(items: [], denied: false) },
         file: { _ in nil },
         environment: [:],
         user: "jane",
