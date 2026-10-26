@@ -1,20 +1,63 @@
 import ProviderKit
 import SwiftUI
 
+/// Menu-bar window size. Every provider, including sign-in, limited data, and
+/// coming soon, is laid out in this box. Shorter pages stay top-aligned.
+/// Taller pages scroll.
+enum PanelChrome {
+    static let width: CGFloat = 320
+    static let height: CGFloat = 480
+}
+
 struct PanelView: View {
+    /// Layout tests measure the natural stack with this set to false.
+    var locksWindowSize = true
+
     @Environment(TidepoolStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var glass
 
     var body: some View {
-        Group {
-            if store.showingSettings {
-                SettingsView()
-            } else {
-                main
+        let stack = page
+            .frame(width: PanelChrome.width, alignment: .topLeading)
+        if locksWindowSize {
+            ScrollView(.vertical) {
+                ZStack(alignment: .topLeading) {
+                    stack
+                        .id(pageID)
+                        .transition(.opacity)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollContentBackground(.hidden)
+            .defaultScrollAnchor(.top)
+            .frame(
+                minWidth: PanelChrome.width,
+                idealWidth: PanelChrome.width,
+                maxWidth: PanelChrome.width,
+                minHeight: PanelChrome.height,
+                idealHeight: PanelChrome.height,
+                maxHeight: PanelChrome.height,
+                alignment: .top
+            )
+            .animation(animation, value: pageID)
+        } else {
+            stack.fixedSize(horizontal: false, vertical: true)
         }
-        .frame(width: 320)
+    }
+
+    private var pageID: String {
+        store.showingSettings ? "settings" : store.selectedProviderID
+    }
+
+    @ViewBuilder
+    private var page: some View {
+        if store.showingSettings {
+            SettingsView()
+        } else {
+            main
+        }
     }
 
     private var main: some View {
@@ -22,31 +65,37 @@ struct PanelView: View {
             GlassEffectContainer(spacing: 8) {
                 VStack(alignment: .leading, spacing: 0) {
                     header
-                    if store.snapshot.availability != .limited,
-                       let attention = store.snapshot.sessions.first(where: { $0.activity == .needsYou }) {
+                    if store.selectedIsComingSoon {
+                        Text("\(store.selectedTitle) is on this Mac. Tidepool does not read it yet.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.bottom, 8)
+                    } else if store.snapshot.availability != .limited,
+                              let attention = store.snapshot.sessions.first(where: { $0.activity == .needsYou }) {
                         attentionPill(attention)
                             .padding(.bottom, 12)
                     }
-                    if let notice = store.snapshot.notice ?? store.actionNotice {
+                    if !store.selectedIsComingSoon, let notice = store.snapshot.notice ?? store.actionNotice {
                         Text(notice)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.bottom, 8)
                     }
-                    if store.snapshot.availability != .limited {
+                    if !store.selectedIsComingSoon, store.snapshot.availability != .limited {
                         usage(now: timeline.date)
                         if showsSessions {
                             sessions(now: timeline.date)
                         }
                     }
-                    if !store.comingSoon.isEmpty {
+                    if !otherComingSoon.isEmpty {
                         Divider().padding(.vertical, 8)
                         Text("On this Mac")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.bottom, 4)
-                        ForEach(store.comingSoon) { tool in
+                        ForEach(otherComingSoon) { tool in
                             Text("\(tool.displayName) · coming soon")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -165,6 +214,10 @@ struct PanelView: View {
             }
         }
         .padding(.bottom, 12)
+    }
+
+    private var otherComingSoon: [CatalogStatus] {
+        store.comingSoon.filter { $0.id != store.selectedProviderID }
     }
 
     /// API meters have no session feed. An empty list would look like a failed lookup.

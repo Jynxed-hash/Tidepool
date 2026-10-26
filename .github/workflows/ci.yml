@@ -48,7 +48,12 @@ jobs:
         run: swift build
 
       - name: Test
-        run: swift test
+        run: |
+          set -euo pipefail
+          mkdir -p dist/panel-screenshots
+          TIDEPOOL_PANEL_SNAPSHOTS="${PWD}/dist/panel-screenshots" swift test
+          test -f dist/panel-screenshots/sizes.txt
+          find dist/panel-screenshots -name '*.png' | grep -q .
 
       - name: Assemble Tidepool.app
         run: scripts/assemble-app.sh
@@ -78,4 +83,12 @@ jobs:
         with:
           name: Tidepool
           path: dist/Tidepool.zip
+          if-no-files-found: error
+
+      - name: Upload panel screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: panel-screenshots
+          path: dist/panel-screenshots
           if-no-files-found: error
