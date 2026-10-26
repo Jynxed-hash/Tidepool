@@ -4,11 +4,44 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
 version="${TIDEPOOL_VERSION:-0.1.0}"
-build="${root}/.build/release"
 app="${root}/dist/Tidepool.app"
 
-swift build -c release --product Tidepool --product cmb-hook
+# SwiftPM applies only the last --product in one invocation, so a combined
+# `swift build --product Tidepool --product cmb-hook` leaves Tidepool out.
+swift build -c release --product Tidepool
+swift build -c release --product cmb-hook
+
+# Absolute path from SwiftPM. Xcode 27 uses .build/out/Products/Release,
+# not .build/release. Do not prefix this with the repo root.
+build="$(swift build -c release --show-bin-path)"
+case "$build" in
+  /*) ;;
+  *)
+    echo "assemble-app: swift build -c release --show-bin-path did not return an absolute path: ${build}" >&2
+    exit 1
+    ;;
+esac
+
+require_binary() {
+  local name="$1"
+  local path="${build}/${name}"
+  if [[ ! -e "$path" ]]; then
+    echo "assemble-app: missing release binary ${path}" >&2
+    echo "assemble-app: swift build -c release --product ${name} did not produce it." >&2
+    exit 1
+  fi
+  if [[ ! -x "$path" ]]; then
+    echo "assemble-app: release binary is not executable: ${path}" >&2
+    exit 1
+  fi
+}
+
+require_binary Tidepool
+require_binary cmb-hook
+
+echo "Release binaries: ${build}"
 
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"

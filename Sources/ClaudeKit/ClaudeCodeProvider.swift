@@ -72,7 +72,7 @@ public struct ClaudeCodeProvider<HTTP: HTTPSending, Credentials: CredentialReadi
             case .expired:
                 notice = "Claude Code's sign-in expired. Open Claude Code once so it can refresh."
             case .notFound, .malformed:
-                notice = "Sign in with Claude Code, then open Tidepool again."
+                notice = "Sign in with Claude Code, then open Tidepool again. If you are already signed in, allow the keychain prompt for Claude Code-credentials."
             }
             let fallback = fallback(request: request, notice: notice)
             return (fallback.windows, fallback.notice, nil)
