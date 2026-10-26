@@ -12,39 +12,36 @@ struct SettingsView: View {
             toggle("Claude Code hooks", isOn: hooks)
             toggle("Unofficial providers", isOn: unofficial)
             Text("Cursor and GitHub Copilot use undocumented endpoints. Turning this off skips those calls.")
-                .font(.body)
-                .foregroundStyle(PanelInk.secondary(colorScheme))
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: PanelChrome.grid) {
-                Text("Menu bar")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(PanelInk.secondary(colorScheme))
-                Picker("Menu bar", selection: format) {
-                    ForEach(MenuBarFormat.allCases) { item in
-                        Text(item.title).tag(item)
-                    }
+                .padding(.leading, 22)
+            sectionHeader("Menu bar")
+            Picker("Menu bar", selection: format) {
+                ForEach(MenuBarFormat.allCases) { item in
+                    Text(item.title).tag(item)
                 }
-                .pickerStyle(.radioGroup)
-                .labelsHidden()
-                .controlSize(.large)
             }
-            Stepper(value: refresh, in: 60...600, step: 30) {
-                Text("Refresh every \(Int(store.refreshSeconds))s")
-                    .font(.body)
-                    .foregroundStyle(PanelInk.primary(colorScheme))
-                    .monospacedDigit()
+            .pickerStyle(.radioGroup)
+            .labelsHidden()
+            .controlSize(.large)
+            sectionHeader("Refresh")
+            Picker("Refresh", selection: refresh) {
+                Text("30s").tag(30.0)
+                Text("60s").tag(60.0)
+                Text("90s").tag(90.0)
+                Text("5m").tag(300.0)
             }
-            .frame(minHeight: PanelChrome.control)
+            .pickerStyle(.menu)
+            .labelsHidden()
+            .frame(minHeight: PanelChrome.control, alignment: .leading)
             if let burn = store.snapshot.today.blockTokensPerHour {
                 Text("Current block ≈ \(TokenFormat.compact(Int(burn))) tokens/hour (est.)")
-                    .font(.subheadline)
-                    .foregroundStyle(PanelInk.secondary(colorScheme))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
-            Text("Tools")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(PanelInk.secondary(colorScheme))
-                .padding(.top, PanelChrome.grid)
+            sectionHeader("Tools")
             ForEach(store.catalog) { tool in
                 HStack {
                     Text(tool.displayName)
@@ -64,8 +61,16 @@ struct SettingsView: View {
             }
         }
         .padding(.horizontal, PanelChrome.margin)
-        .padding(.bottom, PanelChrome.margin)
+        .padding(.bottom, PanelChrome.grid)
         .frame(width: PanelChrome.width, alignment: .topLeading)
+    }
+
+    /// 20 points above the label, 8 below, from the surrounding 8-point stack.
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(PanelInk.secondary(colorScheme))
+            .padding(.top, 12)
     }
 
     private func toggle(_ title: String, isOn: Binding<Bool>) -> some View {

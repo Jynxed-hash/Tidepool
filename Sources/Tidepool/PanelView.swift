@@ -126,33 +126,9 @@ struct PanelView: View {
         VStack(spacing: 0) {
             headerBar
             headerSeparator
-            if store.showingSettings {
-                ScrollView(.vertical) {
-                    SettingsView()
-                }
-                .scrollIndicators(.automatic)
-                .scrollBounceBehavior(.basedOnSize)
-                .scrollContentBackground(.hidden)
-                .trackScrollUnderHeader($contentScrolled)
-            } else if let quiet {
-                quietMessage(quiet)
-                    .padding(.horizontal, PanelChrome.margin)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                footer
-                    .padding(.horizontal, PanelChrome.margin)
-                    .padding(.bottom, PanelChrome.margin)
-            } else {
-                ScrollView(.vertical) {
-                    dataColumn
-                        .padding(.horizontal, PanelChrome.margin)
-                        .padding(.bottom, PanelChrome.margin)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                .scrollIndicators(.automatic)
-                .scrollBounceBehavior(.basedOnSize)
-                .scrollContentBackground(.hidden)
-                .trackScrollUnderHeader($contentScrolled)
-            }
+            pageBody(scrolling: true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            footerBar
         }
     }
 
@@ -160,21 +136,44 @@ struct PanelView: View {
     private var intrinsic: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerBar
-            if store.showingSettings {
-                SettingsView()
-            } else if let quiet {
-                quietMessage(quiet)
-                    .padding(.horizontal, PanelChrome.margin)
-                    .padding(.top, PanelChrome.grid)
-                footer
-                    .padding(.horizontal, PanelChrome.margin)
-                    .padding(.top, PanelChrome.grid)
-                    .padding(.bottom, PanelChrome.margin)
+            pageBody(scrolling: false)
+            footerBar
+        }
+    }
+
+    @ViewBuilder
+    private func pageBody(scrolling: Bool) -> some View {
+        if store.showingSettings {
+            if scrolling {
+                ScrollView(.vertical) {
+                    SettingsView()
+                }
+                .scrollIndicators(.automatic)
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollContentBackground(.hidden)
+                .trackScrollUnderHeader($contentScrolled)
             } else {
+                SettingsView()
+            }
+        } else if let quiet {
+            quietMessage(quiet)
+                .padding(.horizontal, PanelChrome.margin)
+                .frame(maxWidth: .infinity, maxHeight: scrolling ? .infinity : nil)
+        } else if scrolling {
+            ScrollView(.vertical) {
                 dataColumn
                     .padding(.horizontal, PanelChrome.margin)
                     .padding(.bottom, PanelChrome.margin)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .scrollIndicators(.automatic)
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollContentBackground(.hidden)
+            .trackScrollUnderHeader($contentScrolled)
+        } else {
+            dataColumn
+                .padding(.horizontal, PanelChrome.margin)
+                .padding(.bottom, PanelChrome.margin)
         }
     }
 
@@ -193,7 +192,6 @@ struct PanelView: View {
                     store.showingSettings = false
                 } label: {
                     Image(systemName: "chevron.backward")
-                        .frame(minWidth: PanelChrome.control, minHeight: PanelChrome.control)
                 }
                 .panelIconButton()
                 .accessibilityLabel("Back")
@@ -211,28 +209,19 @@ struct PanelView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: PanelChrome.grid) {
-            HStack(spacing: PanelChrome.grid) {
-                providerTitle
-                if store.selectedIsUnofficial {
-                    unofficialBadge
-                }
-                Spacer(minLength: PanelChrome.grid)
-                Button {
-                    Task { await store.setNotifications(enabled: !store.notificationsEnabled) }
-                } label: {
-                    Image(systemName: store.notificationsEnabled ? "bell" : "bell.slash")
-                        .frame(minWidth: PanelChrome.control, minHeight: PanelChrome.control)
-                }
-                .panelIconButton()
-                .accessibilityLabel(store.notificationsEnabled ? "Notifications on" : "Notifications off")
+        HStack(spacing: PanelChrome.grid) {
+            providerTitle
+            if store.selectedIsUnofficial {
+                unofficialBadge
             }
-            if let reset = store.panelReset {
-                Text(reset)
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(PanelInk.secondary(colorScheme))
+            Spacer(minLength: PanelChrome.grid)
+            Button {
+                Task { await store.setNotifications(enabled: !store.notificationsEnabled) }
+            } label: {
+                Image(systemName: store.notificationsEnabled ? "bell" : "bell.slash")
             }
+            .panelIconButton()
+            .accessibilityLabel(store.notificationsEnabled ? "Notifications on" : "Notifications off")
         }
         .padding(.horizontal, PanelChrome.margin)
         .padding(.top, PanelChrome.margin)
@@ -369,16 +358,13 @@ struct PanelView: View {
     private var dataColumn: some View {
         TimelineView(.periodic(from: .now, by: 30)) { timeline in
             panelGlass {
-                VStack(alignment: .leading, spacing: PanelChrome.grid) {
-                    if store.snapshot.availability != .limited,
-                       let attention = store.snapshot.sessions.first(where: { $0.activity == .needsYou }) {
-                        attentionPill(attention)
-                    }
+                VStack(alignment: .leading, spacing: 0) {
                     if let notice = store.snapshot.notice ?? store.actionNotice {
                         Text(notice)
                             .font(.body)
                             .foregroundStyle(PanelInk.secondary(colorScheme))
                             .fixedSize(horizontal: false, vertical: true)
+                            .padding(.bottom, PanelChrome.grid)
                     }
                     if store.snapshot.availability != .limited {
                         usage(now: timeline.date)
@@ -386,37 +372,13 @@ struct PanelView: View {
                             sessions(now: timeline.date)
                         }
                     }
-                    footer
                 }
             }
         }
-    }
-
-    private func attentionPill(_ session: TrackedSession) -> some View {
-        Button {
-            store.focusNeedsYou()
-        } label: {
-            HStack(spacing: PanelChrome.grid) {
-                StatusDot(activity: .needsYou)
-                Text(session.repo)
-                    .foregroundStyle(PanelInk.primary(colorScheme))
-                if let branch = session.branch {
-                    BranchLabel(branch)
-                }
-                Spacer(minLength: PanelChrome.grid)
-                Text("Needs you")
-                    .foregroundStyle(PanelInk.needsYou(colorScheme))
-            }
-            .font(.body)
-            .padding(.horizontal, PanelChrome.grid)
-            .frame(minHeight: PanelChrome.control)
-        }
-        .buttonStyle(.plain)
-        .tidepoolGlass(id: "pill-\(session.id)", namespace: glass, shape: Capsule())
     }
 
     private func usage(now: Date) -> some View {
-        VStack(alignment: .leading, spacing: PanelChrome.grid) {
+        VStack(alignment: .leading, spacing: 14) {
             if store.snapshot.windows.isEmpty {
                 if store.snapshot.providerID == ToolCatalog.claudeCode {
                     Text("Usage appears after Claude Code is signed in.")
@@ -443,6 +405,14 @@ struct PanelView: View {
         }
     }
 
+    /// Needs-you stays in the list, first, instead of a second banner.
+    private var orderedSessions: [TrackedSession] {
+        store.snapshot.sessions.sorted { lhs, rhs in
+            let rank: (SessionActivity) -> Int = { $0 == .needsYou ? 0 : 1 }
+            return rank(lhs.activity) < rank(rhs.activity)
+        }
+    }
+
     private func sessions(now: Date) -> some View {
         VStack(alignment: .leading, spacing: PanelChrome.grid) {
             HStack {
@@ -453,12 +423,13 @@ struct PanelView: View {
                     .foregroundStyle(PanelInk.secondary(colorScheme))
                     .monospacedDigit()
             }
-            if store.snapshot.sessions.isEmpty {
+            .padding(.top, 20)
+            if orderedSessions.isEmpty {
                 Text("No sessions right now.")
                     .font(.caption)
                     .foregroundStyle(PanelInk.secondary(colorScheme))
             } else {
-                ForEach(store.snapshot.sessions.prefix(6)) { session in
+                ForEach(orderedSessions.prefix(6)) { session in
                     SessionRow(
                         session: session,
                         expanded: store.expandedSessionID == session.id,
@@ -490,23 +461,38 @@ struct PanelView: View {
         return store.snapshot.today.tokens > 0 || store.snapshot.today.costUSD != nil
     }
 
-    private var footer: some View {
-        HStack(alignment: .center, spacing: PanelChrome.grid) {
-            if showsToday {
-                Text(TokenFormat.todayLine(store.snapshot.today))
-                    .font(.caption)
-                    .foregroundStyle(PanelInk.secondary(colorScheme))
-                    .monospacedDigit()
+    /// Pinned on every page. Blank when this provider has no today figure.
+    private var todayFooterText: String? {
+        guard showsToday else { return nil }
+        let today = store.snapshot.today
+        let tokens = "Today ≈ \(TokenFormat.compact(today.tokens)) tokens"
+        guard let cost = today.costUSD, !today.costIncomplete else { return tokens }
+        return "\(tokens) ≈ \(TokenFormat.dollars(cost))"
+    }
+
+    private var footerBar: some View {
+        VStack(spacing: 0) {
+            PanelInk.separator(colorScheme)
+                .frame(height: 1)
+                .frame(maxWidth: .infinity)
+            HStack(alignment: .center, spacing: PanelChrome.grid) {
+                if let today = todayFooterText {
+                    Text(today)
+                        .font(.caption)
+                        .foregroundStyle(PanelInk.secondary(colorScheme))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+                Spacer(minLength: PanelChrome.grid)
+                Button {
+                    store.showingSettings.toggle()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .panelIconButton()
+                .accessibilityLabel("Settings")
             }
-            Spacer(minLength: PanelChrome.grid)
-            Button {
-                store.showingSettings.toggle()
-            } label: {
-                Image(systemName: "gearshape")
-                    .frame(minWidth: PanelChrome.control, minHeight: PanelChrome.control)
-            }
-            .panelIconButton()
-            .accessibilityLabel("Settings")
+            .padding(PanelChrome.margin)
         }
     }
 
@@ -535,24 +521,27 @@ struct UsageRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text(window.title)
+                Text("\(window.title) · used")
                     .font(.body)
-                    .foregroundStyle(PanelInk.primary(colorScheme))
-                Spacer()
+                    .foregroundStyle(Color(nsColor: .labelColor))
+                Spacer(minLength: PanelChrome.grid)
                 Text(percent)
                     .font(.title3.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundStyle(window.isAtLimit ? PanelInk.limit(colorScheme) : PanelInk.primary(colorScheme))
+                    .foregroundStyle(MeterPaint.fill(window.usedPercent))
             }
             UsageBar(percent: window.usedPercent)
-                .padding(.vertical, 4)
-            Text(meta)
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(window.isNearLimit ? PanelInk.primary(colorScheme) : PanelInk.secondary(colorScheme))
+                .padding(.top, 6)
+            if !meta.isEmpty {
+                Text(meta)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(PanelInk.secondary(colorScheme))
+                    .padding(.top, 4)
+            }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(window.title), \(percent), \(meta)")
+        .accessibilityLabel("\(window.title) used, \(percent), \(meta)")
     }
 
     private var percent: String {
@@ -574,19 +563,19 @@ struct UsageRow: View {
 struct UsageBar: View {
     var percent: Double
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width * min(1, max(0, percent / 100))
             ZStack(alignment: .leading) {
-                Capsule().fill(PanelInk.separator(colorScheme))
-                Capsule()
-                    .fill(percent >= 90 ? PanelInk.limit(colorScheme) : PanelInk.primary(colorScheme))
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(MeterPaint.track)
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(MeterPaint.fill(percent))
                     .frame(width: width)
             }
         }
-        .frame(height: PanelChrome.grid / 2)
+        .frame(height: 4)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: percent)
         .accessibilityValue("\(Int(percent.rounded())) percent")
     }
@@ -612,16 +601,21 @@ struct SessionRow: View {
                         StatusDot(activity: session.activity)
                         Text(session.repo)
                             .font(.body)
-                            .foregroundStyle(PanelInk.primary(colorScheme))
+                            .foregroundStyle(Color(nsColor: .labelColor))
                             .lineLimit(1)
+                            .layoutPriority(1)
                         if let branch = session.branch {
                             BranchLabel(branch)
+                                .layoutPriority(0)
+                                .frame(minWidth: 0, alignment: .leading)
                         }
                         Spacer(minLength: PanelChrome.grid)
                         Text(statusText)
                             .font(.caption)
                             .monospacedDigit()
-                            .foregroundStyle(session.activity == .needsYou ? PanelInk.needsYou(colorScheme) : PanelInk.secondary(colorScheme))
+                            .foregroundStyle(session.activity == .needsYou ? Color(nsColor: .systemOrange) : Color.secondary)
+                            .layoutPriority(2)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                     .frame(minHeight: PanelChrome.control)
                     if expanded, let waiting = waitingLine {
@@ -649,7 +643,7 @@ struct SessionRow: View {
                             .font(.subheadline)
                             .frame(minHeight: PanelChrome.control)
                     }
-                    .panelIconButton()
+                    .buttonStyle(.glass)
                     .disabled(session.cwd == nil)
                     Button {
                         if let cwd = session.cwd { SessionOpener.openCursor(cwd) }
@@ -658,7 +652,7 @@ struct SessionRow: View {
                             .font(.subheadline)
                             .frame(minHeight: PanelChrome.control)
                     }
-                    .panelIconButton()
+                    .buttonStyle(.glass)
                     .disabled(session.cwd == nil || !cursorInstalled)
                 }
             }
@@ -695,22 +689,21 @@ struct SessionRow: View {
 
 struct StatusDot: View {
     var activity: SessionActivity
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         switch activity {
         case .needsYou:
             Image(systemName: "circle.fill")
                 .font(.system(size: 8))
-                .foregroundStyle(PanelInk.needsYou(colorScheme))
+                .foregroundStyle(Color(nsColor: .systemOrange))
         case .working:
             Image(systemName: "circle.dotted")
-                .font(.system(size: 10))
-                .foregroundStyle(PanelInk.secondary(colorScheme))
+                .font(.system(size: 8))
+                .foregroundStyle(Color.secondary)
         case .idle:
             Image(systemName: "circle")
                 .font(.system(size: 8))
-                .foregroundStyle(PanelInk.separator(colorScheme))
+                .foregroundStyle(Color.secondary)
         }
     }
 }
@@ -729,15 +722,45 @@ struct BranchLabel: View {
                 .font(.system(size: 9))
             Text(name)
                 .lineLimit(1)
+                .truncationMode(.middle)
         }
         .font(.caption.monospaced())
         .foregroundStyle(PanelInk.secondary(colorScheme))
     }
 }
 
-private struct PanelIconButtonModifier: ViewModifier {
-    func body(content: Content) -> some View {
-        content.buttonStyle(.glass)
+private struct PanelIconButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        PanelIconButtonBody(configuration: configuration)
+    }
+}
+
+/// Borderless 28×28 icon. Hover fills labelColor at 6% inside a 6-point radius.
+private struct PanelIconButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    @State private var hovering = false
+
+    var body: some View {
+        configuration.label
+            .font(.system(size: 15))
+            .foregroundStyle(.secondary)
+            .frame(width: PanelChrome.control, height: PanelChrome.control)
+            .background {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color(nsColor: .labelColor).opacity(hovering || configuration.isPressed ? 0.06 : 0))
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .onHover { hovering = $0 }
+    }
+}
+
+enum MeterPaint {
+    static var track: Color { Color(nsColor: .labelColor).opacity(0.12) }
+
+    static func fill(_ percent: Double) -> Color {
+        if percent >= 90 { return Color(nsColor: .systemRed) }
+        if percent >= 75 { return Color(nsColor: .systemOrange) }
+        return Color(nsColor: .labelColor)
     }
 }
 
@@ -763,7 +786,7 @@ private struct TidepoolGlassModifier<S: Shape>: ViewModifier {
 
 extension View {
     func panelIconButton() -> some View {
-        modifier(PanelIconButtonModifier())
+        buttonStyle(PanelIconButtonStyle())
     }
 
     func tidepoolGlass<S: Shape>(id: String, namespace: Namespace.ID, shape: S) -> some View {
