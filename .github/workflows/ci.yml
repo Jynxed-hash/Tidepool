@@ -59,7 +59,10 @@ jobs:
           bin="dist/Tidepool.app/Contents/MacOS"
           test -x "$bin/Tidepool"
           test -x "$bin/cmb-hook"
+          test -f dist/Tidepool.app/Contents/Resources/AppIcon.icns
           plutil -lint dist/Tidepool.app/Contents/Info.plist
+          icon="$(plutil -extract CFBundleIconFile raw dist/Tidepool.app/Contents/Info.plist)"
+          test "$icon" = "AppIcon"
           minimum="$(plutil -extract LSMinimumSystemVersion raw dist/Tidepool.app/Contents/Info.plist)"
           test "$minimum" = "26.0"
           # Ad-hoc signature so codesign --verify has something to check.
