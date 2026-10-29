@@ -1,0 +1,77 @@
+# Runs TidepoolTests (Swift Testing) and uploads the JUnit file, log, and panel screenshots.
+# The token can read the repo and upload artifacts. It cannot push.
+name: Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidepool-test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/select-xcode
+
+      - name: Run tests
+        run: |
+          set -euo pipefail
+          mkdir -p dist/test-results dist/panel-screenshots
+          set +e
+          set -o pipefail
+          TIDEPOOL_PANEL_SNAPSHOTS="${PWD}/dist/panel-screenshots" \
+            swift test --xunit-output "${PWD}/dist/test-results/junit.xml" \
+            2>&1 | tee dist/test-results/swift-test.log
+          status=${PIPESTATUS[0]}
+          exit "$status"
+
+      - name: Check panel screenshots
+        run: |
+          set -euo pipefail
+          test -f dist/panel-screenshots/sizes.txt
+          find dist/panel-screenshots -name '*.png' | grep -q .
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: dist/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload panel screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: panel-screenshots
+          path: dist/panel-screenshots
+          if-no-files-found: warn
+          retention-days: 14
+
+  request-fix:
+    name: Request a fix
+    needs: unit
+    if: always() && (needs.unit.result == 'failure' || needs.unit.result == 'success')
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: read
+      actions: read
+    uses: ./.github/workflows/ci-fix.yml
+    with:
+      outcome: ${{ needs.unit.result }}
+      area: Test

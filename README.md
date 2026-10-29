@@ -179,7 +179,9 @@ Unit tests, from the repo root:
 swift test
 ```
 
-They cover usage JSON, status-line JSON, transcript dedupe, block boundaries, list prices, hook ingestion, the settings installer, install detection, Codex and Grok fixtures, the five API meters, and the unofficial Cursor and Copilot fixtures. They do not call Anthropic, Cursor, or GitHub.
+They cover usage JSON, status-line JSON, transcript dedupe, block boundaries, list prices, hook ingestion, the settings installer, install detection, Codex and Grok fixtures, the five API meters, and the unofficial Cursor and Copilot fixtures. Reset countdowns, a missing reset timestamp, a blank API key, and the Limited data fallback are in `CoreLogicTests`. They do not call Anthropic, Cursor, or GitHub.
+
+The Test workflow on `macos-latest` runs the same `swift test` and uploads `test-results` plus `panel-screenshots`. See [Building locally and CI](#building-locally-and-ci).
 
 ### Launch and Claude Code hooks
 
@@ -231,7 +233,16 @@ open dist/Tidepool.app
 
 `scripts/assemble-app.sh` runs one `swift build -c release --product …` per executable. A single invocation that passes both `--product Tidepool` and `--product cmb-hook` builds only the last product. The script copies from `swift build -c release --show-bin-path`. That path is absolute. On Xcode 27 it is `.build/out/Products/Release` under the checkout, not `.build/release`. The script exits with a message if either binary is missing.
 
-GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request, on the `xcode-27` runner. That image is the latest hosted macOS image whose Xcode can build this package (`swift-tools-version` 6.2, `LSMinimumSystemVersion` 26). The job selects an Xcode, prints `xcodebuild -version` and `swift --version`, then runs `swift build`, `swift test`, and `scripts/assemble-app.sh`. It checks that `dist/Tidepool.app/Contents/MacOS` contains `Tidepool` and `cmb-hook`, that `Info.plist` passes `plutil -lint`, and that `codesign --verify` succeeds after an ad-hoc signature. The zipped app is uploaded as the `Tidepool` artifact. Ad-hoc signing is not notarization.
+GitHub Actions runs on every push and pull request, on `macos-latest` (the free macOS 26 runner; Xcode 26.6 can build Swift tools 6.2). Each job selects an Xcode, then prints `xcodebuild -version` and `swift --version`.
+
+| Workflow | File | What runs | Artifacts on the run |
+|---|---|---|---|
+| Build | `.github/workflows/build.yml` | `scripts/assemble-app.sh`, then the bundle checks | `Tidepool` (zipped app), `build-log` |
+| Test | `.github/workflows/test.yml` | `swift test` for `TidepoolTests` | `test-results` (`junit.xml` and `swift-test.log`), `panel-screenshots` |
+
+Build checks that `dist/Tidepool.app/Contents/MacOS` contains `Tidepool` and `cmb-hook`, that `Info.plist` passes `plutil -lint`, and that `codesign --verify` succeeds after an ad-hoc signature. Ad-hoc signing is not notarization. Open the check on the pull request, then download the artifacts from the run summary.
+
+When Build or Test fails, `.github/workflows/ci-fix.yml` adds the `ci-fix` label and writes a fix task on the pull request (or opens an issue when the branch has no pull request). That job's token cannot push. A green Build and a green Test remove the label. Merging stays with a person. The pickup steps for a Cursor agent are in [CONTRIBUTING.md](CONTRIBUTING.md#build-test-and-fix-loop).
 
 A Linux checkout can run `swift test`. The SwiftUI app is not part of the package there, so it cannot compile the menu bar app.
 

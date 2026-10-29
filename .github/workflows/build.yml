@@ -1,0 +1,86 @@
+# Builds Tidepool.app with scripts/assemble-app.sh.
+# The token can read the repo and upload artifacts. It cannot push.
+name: Build
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidepool-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  assemble:
+    name: Assemble Tidepool.app
+    # Free macOS 26 runner. Xcode 26.6 is the default and can build
+    # swift-tools-version 6.2 with LSMinimumSystemVersion 26.
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/select-xcode
+
+      - name: Assemble release app
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          scripts/assemble-app.sh 2>&1 | tee dist/assemble.log
+
+      - name: Verify bundle
+        run: |
+          set -euo pipefail
+          bin="dist/Tidepool.app/Contents/MacOS"
+          test -x "$bin/Tidepool"
+          test -x "$bin/cmb-hook"
+          test -f dist/Tidepool.app/Contents/Resources/AppIcon.icns
+          plutil -lint dist/Tidepool.app/Contents/Info.plist
+          icon="$(plutil -extract CFBundleIconFile raw dist/Tidepool.app/Contents/Info.plist)"
+          test "$icon" = "AppIcon"
+          minimum="$(plutil -extract LSMinimumSystemVersion raw dist/Tidepool.app/Contents/Info.plist)"
+          test "$minimum" = "26.0"
+          # Ad-hoc signature so codesign --verify has something to check.
+          # The runner has no Developer ID identity. This is not notarization.
+          codesign --force --deep --sign - dist/Tidepool.app
+          codesign --verify --verbose=2 dist/Tidepool.app
+
+      - name: Zip Tidepool.app
+        run: ditto -c -k --keepParent dist/Tidepool.app dist/Tidepool.zip
+
+      - name: Upload Tidepool.app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tidepool
+          path: dist/Tidepool.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: dist/assemble.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  request-fix:
+    name: Request a fix
+    needs: assemble
+    if: always() && (needs.assemble.result == 'failure' || needs.assemble.result == 'success')
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: read
+      actions: read
+    uses: ./.github/workflows/ci-fix.yml
+    with:
+      outcome: ${{ needs.assemble.result }}
+      area: Build
