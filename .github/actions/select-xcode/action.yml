@@ -1,0 +1,66 @@
+name: Select Xcode
+description: Select an Xcode that can build Swift tools 6.2 and the macOS 26 SDK.
+
+runs:
+  using: composite
+  steps:
+    - name: Select Xcode
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Highest toolchain first. macos-latest ships Xcode 26.6 (also as
+        # Xcode.app). xcode-27 ships the Xcode 27 toolchain. Either can build
+        # this package; the first one installed wins.
+        preferred=(
+          /Applications/Xcode_27.1.app
+          /Applications/Xcode_27.1.0.app
+          /Applications/Xcode_27.app
+          /Applications/Xcode_26.6.app
+          /Applications/Xcode_26.6.0.app
+          /Applications/Xcode_26.5.app
+          /Applications/Xcode_26.4.1.app
+          /Applications/Xcode_26.4.app
+          /Applications/Xcode_26.3.app
+          /Applications/Xcode_26.2.app
+          /Applications/Xcode_26.1.1.app
+          /Applications/Xcode_26.1.app
+          /Applications/Xcode_26.0.1.app
+          /Applications/Xcode_26.app
+          /Applications/Xcode.app
+        )
+        selected=""
+        for app in "${preferred[@]}"; do
+          if [[ -d "$app" ]]; then
+            selected="$app"
+            break
+          fi
+        done
+        if [[ -z "$selected" ]]; then
+          shopt -s nullglob
+          for app in /Applications/Xcode_*.app /Applications/Xcode.app; do
+            if [[ -d "$app" ]]; then
+              selected="$app"
+              break
+            fi
+          done
+        fi
+        if [[ -z "$selected" ]]; then
+          echo "No Xcode app that can build Swift tools 6.2 for macOS 26." >&2
+          ls -d /Applications/Xcode*.app >&2 || true
+          exit 1
+        fi
+        sudo xcode-select -s "$selected"
+        echo "DEVELOPER_DIR=$(xcode-select -p)"
+        xcodebuild -version
+        version_line="$(swift --version 2>&1 | head -n 1)"
+        echo "$version_line"
+        if [[ ! "$version_line" =~ Swift\ version\ ([0-9]+)\.([0-9]+) ]]; then
+          echo "Could not parse the Swift version from: ${version_line}" >&2
+          exit 1
+        fi
+        major="${BASH_REMATCH[1]}"
+        minor="${BASH_REMATCH[2]}"
+        if (( major < 6 || (major == 6 && minor < 2) )); then
+          echo "Swift ${major}.${minor} cannot build swift-tools-version 6.2." >&2
+          exit 1
+        fi
