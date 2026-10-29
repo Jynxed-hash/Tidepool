@@ -98,7 +98,7 @@ import Testing
     #expect(!found.evidence.joined(separator: " ").contains("sk-or-secret"))
 }
 
-@Test func limitedDataFallbackKeepsNoInventedWindow() async {
+@Test func limitedDataFallbackKeepsNoInventedWindow() async throws {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
     let apps = root.appendingPathComponent("Applications")
     try FileManager.default.createDirectory(at: apps.appendingPathComponent("Grok Bot.app"), withIntermediateDirectories: true)

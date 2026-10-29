@@ -45,14 +45,25 @@ jobs:
           mkdir -p "$RUNNER_TEMP"
           log="$RUNNER_TEMP/ci-fix-log.txt"
           : > "$log"
+          # The workflow run is still in progress while this job downloads logs,
+          # so `gh run view --log-failed` has nothing yet. Completed jobs already
+          # expose their own logs.
           for _ in 1 2 3 4 5 6; do
-            if gh run view "$GITHUB_RUN_ID" --log-failed > "$log"; then
-              if [[ -s "$log" ]]; then
-                break
-              fi
+            ids="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs" \
+              --jq '.jobs[] | select(.conclusion=="failure") | .id')"
+            if [[ -n "$ids" ]]; then
+              : > "$log"
+              for id in $ids; do
+                gh api --allow-escape-sequences "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}/logs" >> "$log" || true
+                printf '\n' >> "$log"
+              done
+            fi
+            if [[ -s "$log" ]]; then
+              break
             fi
             sleep 5
           done
+          echo "captured $(wc -c < "$log") bytes from failed jobs"
 
       - name: Comment, label, or clear
         uses: actions/github-script@v7

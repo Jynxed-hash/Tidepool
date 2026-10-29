@@ -183,7 +183,11 @@ async function annotationsFor(github, context, jobs) {
         const path = note.path || 'log'
         const line = note.start_line ? `:${note.start_line}` : ''
         const message = String(note.message || '').replace(/\s+/g, ' ').trim()
-        lines.push(`${path}${line}: ${message}`)
+        const rendered = `${path}${line}: ${message}`
+        if (/Node\.js 20 is deprecated|capacity constraints|No files were found with the provided path|Process completed with exit code/i.test(rendered)) {
+          continue
+        }
+        lines.push(rendered)
         if (lines.length >= 40) return lines
       }
     } catch (error) {
