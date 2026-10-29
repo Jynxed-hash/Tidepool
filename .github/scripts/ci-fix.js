@@ -288,12 +288,20 @@ async function clearLabelWhenBothGreen(github, context, core) {
     return
   }
   const { owner, repo } = context.repo
+  const head = context.payload
+    && context.payload.pull_request
+    && context.payload.pull_request.head
+    && context.payload.pull_request.head.sha
+  // pull_request runs attach checks to the head SHA. github.sha on that
+  // event is the merge commit, which has none of these check runs.
+  const ref = head || context.sha
+  core.info(`Checking ${ref} for completed Build and Test.`)
   const runs = []
   for (let page = 1; page <= 5; page += 1) {
     const { data } = await github.rest.checks.listForRef({
       owner,
       repo,
-      ref: context.sha,
+      ref,
       per_page: 100,
       page,
     })

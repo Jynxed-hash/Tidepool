@@ -83,7 +83,7 @@ Fork pull requests get no comment. The Actions log is the record, and Cursor aut
 
 Add one automation at [cursor.com/automations](https://cursor.com/automations), or with `/automate` in the Agents window, on `Jynxed-hash/Tidepool`:
 
-1. Trigger: **CI completed**, for the Build and Test workflows. **Pull request label changed** on `ci-fix` is a second way in. **Comment added** also sees a new fix task.
+1. Trigger: **CI completed**, for the Build and Test workflows. **Pull request label changed** when `ci-fix` is added is a second way in. **Comment added** also sees a new fix task.
 2. Leave pull-request approval tools off.
 3. Prompt the agent with this:
 
