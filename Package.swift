@@ -16,6 +16,18 @@ var products: [Product] = [
     .executable(name: "cmb-hook", targets: ["cmb-hook"]),
 ]
 
+var testDependencies: [Target.Dependency] = [
+    "ProviderKit",
+    "HookBridge",
+    "ClaudeKit",
+    "CodexKit",
+    "GrokKit",
+    "MeterKit",
+]
+#if os(macOS)
+testDependencies.append("Tidepool")
+#endif
+
 var targets: [Target] = [
     .target(name: "ProviderKit"),
     .target(name: "HookBridge"),
@@ -41,7 +53,7 @@ var targets: [Target] = [
     ),
     .testTarget(
         name: "TidepoolTests",
-        dependencies: ["ProviderKit", "HookBridge", "ClaudeKit", "CodexKit", "GrokKit", "MeterKit"]
+        dependencies: testDependencies
     ),
 ]
 

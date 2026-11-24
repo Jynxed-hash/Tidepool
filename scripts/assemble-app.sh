@@ -50,6 +50,13 @@ cp "${build}/Tidepool" "$app/Contents/MacOS/Tidepool"
 cp "${build}/cmb-hook" "$app/Contents/MacOS/cmb-hook"
 chmod 755 "$app/Contents/MacOS/Tidepool" "$app/Contents/MacOS/cmb-hook"
 
+icon="${root}/Sources/Tidepool/Resources/AppIcon.icns"
+if [[ ! -f "$icon" ]]; then
+  echo "assemble-app: missing app icon ${icon}" >&2
+  exit 1
+fi
+cp "$icon" "$app/Contents/Resources/AppIcon.icns"
+
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -69,6 +76,8 @@ cat > "$app/Contents/Info.plist" <<EOF
   <string>Tidepool</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundleShortVersionString</key>
   <string>${version}</string>
   <key>CFBundleVersion</key>

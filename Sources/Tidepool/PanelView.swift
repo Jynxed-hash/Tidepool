@@ -65,20 +65,28 @@ struct PanelView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            providerTitle
-            if store.selectedIsUnofficial {
-                unofficialBadge
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                providerTitle
+                if store.selectedIsUnofficial {
+                    unofficialBadge
+                }
+                Spacer(minLength: 8)
+                Button {
+                    Task { await store.setNotifications(enabled: !store.notificationsEnabled) }
+                } label: {
+                    Image(systemName: store.notificationsEnabled ? "bell" : "bell.slash")
+                        .font(.system(size: 12))
+                }
+                .buttonStyle(.glass)
+                .accessibilityLabel(store.notificationsEnabled ? "Notifications on" : "Notifications off")
             }
-            Spacer(minLength: 8)
-            Button {
-                Task { await store.setNotifications(enabled: !store.notificationsEnabled) }
-            } label: {
-                Image(systemName: store.notificationsEnabled ? "bell" : "bell.slash")
-                    .font(.system(size: 12))
+            if let reset = store.panelReset {
+                Text(reset)
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.glass)
-            .accessibilityLabel(store.notificationsEnabled ? "Notifications on" : "Notifications off")
         }
         .padding(.bottom, 10)
     }
